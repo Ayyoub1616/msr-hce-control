@@ -2100,6 +2100,8 @@
   }
 
   function bindPage(){
+    const quickAdmin=$("#quickAdminBtn"); if(quickAdmin)quickAdmin.onclick=()=>openAdminCenter("edit");
+
     const problemsBtn=$("#problemsBtn"); if(problemsBtn)problemsBtn.onclick=()=>showProblemsModal();
 
     const addManualMSR=$("#addManualMSRBtn"); if(addManualMSR)addManualMSR.onclick=()=>openManualMsrModal();
