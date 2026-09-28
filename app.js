@@ -18,6 +18,14 @@
   let stateView = { ids: [], showAll: false };
   let summaryFilter = "all";
   let summaryDateFilter = "all";
+  let summaryDateFrom = "";
+  let summaryDateTo = "";
+  let summaryStateFilter = "all";
+  let summaryShippingFilter = "all";
+  let summaryServalFilter = "all";
+  let summaryIdsFilter = [];
+  let summarySortKey = "planDateTime";
+  let summarySortDir = "asc";
 
   const $ = s => document.querySelector(s);
   const content = $("#content");
@@ -122,7 +130,6 @@
   const pages={
     inicio:["Inicio","Centro de mando MSR / HCE"],
     resumen:["Resumen MSR","Situación de órdenes, expediciones y cumplimiento"],
-    estados:["Editar estados","Busca varias IDs, edita y conserva el histórico"],
     hce:["Contenedores HCE","Recepción, descarga y checklist operativo"],
     "import-msr":["Importar MSR","Carga el export MSR sin borrar estados manuales"],
     "import-hce":["Importar HCE","Carga la planificación HCE del día"],
@@ -130,6 +137,7 @@
   };
 
   function go(p){
+    if(p==="estados")p="resumen";
     page=p; location.hash=p;
     document.querySelectorAll("#nav button").forEach(b=>b.classList.toggle("active",b.dataset.page===p));
     $("#pageTitle").textContent=pages[p][0]; $("#pageSubtitle").textContent=pages[p][1];
@@ -182,38 +190,120 @@
   function kpi(label,value,hint){return `<div class="kpi"><small>${label}</small><strong>${esc(value)}</strong><div class="hint">${hint}</div></div>`}
 
   function orderRows(){
-    return db.msr.map(o=>({o,s:db.states[idNorm(o.id)]||{id:idNorm(o.id),status:"Pendiente",shipping:"No",serval:"No"}}))
-      .sort((a,b)=>(`${a.o.planDate}${a.o.planTime}`).localeCompare(`${b.o.planDate}${b.o.planTime}`));
+    return db.msr.map(o=>({o,s:stateFor(o.id)}));
   }
+
+  function msrOptions(current, options){
+    return options.map(v=>`<option value="${esc(v)}" ${current===v?"selected":""}>${esc(v)}</option>`).join("");
+  }
+
+  function sortSummaryRows(rows){
+    const val=({o,s})=>{
+      if(summarySortKey==="planDateTime")return `${o.planDate||""} ${o.planTime||""}`;
+      if(summarySortKey==="date")return o.planDate||"";
+      if(summarySortKey==="time")return o.planTime||"";
+      if(summarySortKey==="id")return Number(o.id)||0;
+      if(summarySortKey==="situation")return situation(o);
+      if(summarySortKey==="status")return s.status||"";
+      if(summarySortKey==="shipping")return s.shipping||"";
+      if(summarySortKey==="serval")return s.serval||"";
+      if(summarySortKey==="remaining")return Number(palletsLeft(s))||0;
+      if(summarySortKey==="total")return Number(s.total)||0;
+      if(summarySortKey==="sent")return Number(s.sent)||0;
+      return "";
+    };
+    return rows.sort((a,b)=>{
+      const va=val(a),vb=val(b);
+      let cmp=0;
+      if(typeof va==="number" && typeof vb==="number")cmp=va-vb;
+      else cmp=String(va).localeCompare(String(vb),"es",{numeric:true,sensitivity:"base"});
+      return summarySortDir==="desc"?-cmp:cmp;
+    });
+  }
+
   function tableOrders(rows,compact=false){
-    const rr=rows.map(x=>x.o?x:{o:x,s:db.states[idNorm(x.id)]||{}});
-    if(!rr.length)return `<div class="empty">No hay órdenes MSR importadas.</div>`;
-    const head=compact?`<th>Situación</th><th>Fecha</th><th>Hora</th><th>ID</th><th>OT</th>`:
-      `<th>Situación</th><th>Fecha prev.</th><th>Hora</th><th>ID</th><th>OT</th><th>Estado</th><th>Envío</th><th>Fecha envío</th><th>Hora</th><th>Serval</th><th>Comentario</th><th>Pallets / tiempo</th>`;
-    const body=rr.map(({o,s})=> compact?
-      `<tr class="clickable" data-edit-id="${esc(o.id)}"><td>${badge(situation(o))}</td><td>${fmtDate(o.planDate)}</td><td>${fmtTime(o.planTime)}</td><td><strong>${esc(o.id)}</strong></td><td>${esc(o.loadOT||"")}</td></tr>`:
-      `<tr class="clickable" data-edit-id="${esc(o.id)}"><td>${badge(situation(o))}</td><td>${fmtDate(o.planDate)}</td><td>${fmtTime(o.planTime)}</td><td><strong>${esc(o.id)}</strong></td><td>${esc(o.loadOT||"")}</td><td>${badge(s.status||"Pendiente")}</td><td>${badge(s.shipping||"No")}</td><td>${fmtDate(s.date)}</td><td>${fmtTime(s.time)}</td><td>${badge(s.serval||"No")}</td><td class="wrap">${esc(s.comment||"")}</td><td class="wrap">${esc(timing(o,s))}</td></tr>`
-    ).join("");
-    return `<table class="data-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+    const rr=rows.map(x=>x.o?x:{o:x,s:stateFor(x.id)});
+    if(!rr.length)return `<div class="empty">No hay órdenes MSR con estos filtros.</div>`;
+    if(compact){
+      return `<table class="data-table"><thead><tr><th>Situación</th><th>Fecha</th><th>Hora</th><th>ID</th><th>OT</th></tr></thead><tbody>${rr.map(({o})=>`<tr><td>${badge(situation(o))}</td><td>${fmtDate(o.planDate)}</td><td>${fmtTime(o.planTime)}</td><td><strong>${esc(o.id)}</strong></td><td>${esc(o.loadOT||"")}</td></tr>`).join("")}</tbody></table>`;
+    }
+    return `<table class="data-table msr-table"><thead><tr>
+      <th>Situación</th><th>Fecha prev.</th><th>Hora</th><th>ID</th><th>OT</th>
+      <th>Estado</th><th>Envío</th><th>Fecha envío</th><th>Hora envío</th>
+      <th>Pallets total</th><th>Enviados</th><th>Quedan</th><th>Serval</th><th>Comentario</th><th>Tiempo</th>
+      </tr></thead><tbody>${rr.map(({o,s})=>`<tr>
+        <td class="msr-situation">${badge(situation(o))}</td>
+        <td>${fmtDate(o.planDate)}</td>
+        <td>${fmtTime(o.planTime)}</td>
+        <td><strong>${esc(o.id)}</strong></td>
+        <td>${esc(o.loadOT||"")}</td>
+        <td><select class="msr-edit msr-select" data-msr-id="${esc(o.id)}" data-msr-field="status">${msrOptions(s.status||"Pendiente",["Pendiente","En proceso","Finalizado"])}</select></td>
+        <td><select class="msr-edit msr-select" data-msr-id="${esc(o.id)}" data-msr-field="shipping">${msrOptions(s.shipping||"No",["No","Parcial","Total"])}</select></td>
+        <td><input class="msr-edit msr-date" type="date" data-msr-id="${esc(o.id)}" data-msr-field="date" value="${esc(s.date||"")}"></td>
+        <td><input class="msr-edit msr-time" type="time" data-msr-id="${esc(o.id)}" data-msr-field="time" value="${esc(s.time||"")}"></td>
+        <td><input class="msr-edit msr-num" type="number" min="0" step="1" data-msr-id="${esc(o.id)}" data-msr-field="total" value="${esc(s.total??"")}"></td>
+        <td><input class="msr-edit msr-num" type="number" min="0" step="1" data-msr-id="${esc(o.id)}" data-msr-field="sent" value="${esc(s.sent??"")}"></td>
+        <td><strong>${esc(palletsLeft(s))}</strong></td>
+        <td><select class="msr-edit msr-select-short" data-msr-id="${esc(o.id)}" data-msr-field="serval">${msrOptions(s.serval||"No",["No","Si"])}</select></td>
+        <td><textarea class="msr-edit msr-comment" rows="2" data-msr-id="${esc(o.id)}" data-msr-field="comment" placeholder="Comentario">${esc(s.comment||"")}</textarea></td>
+        <td class="wrap">${esc(timing(o,s))}</td>
+      </tr>`).join("")}</tbody></table>`;
   }
 
   function renderResumen(){
     let rows=orderRows();
-    const dates=[...new Set(db.msr.map(o=>o.planDate).filter(Boolean))].sort();
+
     if(summaryDateFilter!=="all") rows=rows.filter(({o})=>o.planDate===summaryDateFilter);
+    if(summaryDateFrom) rows=rows.filter(({o})=>o.planDate && o.planDate>=summaryDateFrom);
+    if(summaryDateTo) rows=rows.filter(({o})=>o.planDate && o.planDate<=summaryDateTo);
     if(summaryFilter!=="all") rows=rows.filter(({o})=>situation(o)===summaryFilter);
+    if(summaryStateFilter!=="all") rows=rows.filter(({s})=>(s.status||"Pendiente")===summaryStateFilter);
+    if(summaryShippingFilter!=="all") rows=rows.filter(({s})=>(s.shipping||"No")===summaryShippingFilter);
+    if(summaryServalFilter!=="all") rows=rows.filter(({s})=>(s.serval||"No")===summaryServalFilter);
+    if(summaryIdsFilter.length) rows=rows.filter(({o})=>summaryIdsFilter.includes(idNorm(o.id)));
+    rows=sortSummaryRows(rows);
+
+    const dates=[...new Set(db.msr.map(o=>o.planDate).filter(Boolean))].sort();
     content.innerHTML=`
       <div class="panel" style="margin-top:0">
         <div class="panel-head">
-          <div><h2>Resumen MSR</h2><p>${rows.length} órdenes visibles de ${db.msr.length}. El filtro no borra datos.</p></div>
-          <div class="filters">
-            <select id="summaryDateFilter" class="filter-input">
-              <option value="all">Todas las fechas</option>
-              ${dates.map(d=>`<option value="${esc(d)}" ${summaryDateFilter===d?"selected":""}>${fmtDate(d)}</option>`).join("")}
-            </select>
-            ${filterBtn("all","Todas")}${filterBtn("PENDIENTE","Pendientes")}${filterBtn("RETRASO","Retrasos")}${filterBtn("EXPEDIDO PARCIAL","Parciales")}${filterBtn("EXPEDIDO","Expedidas")}
-          </div>
+          <div><h2>Resumen y gestión MSR</h2><p>${rows.length} órdenes visibles de ${db.msr.length}. Edita directamente en la tabla; se guarda automáticamente.</p></div>
+          <div class="actions"><button class="btn ghost" id="resetSummaryFilters">Limpiar filtros</button></div>
         </div>
+
+        <div class="msr-filter-grid">
+          <label>Fecha concreta<select id="summaryDateFilter" class="filter-input"><option value="all">Todas</option>${dates.map(d=>`<option value="${esc(d)}" ${summaryDateFilter===d?"selected":""}>${fmtDate(d)}</option>`).join("")}</select></label>
+          <label>Desde<input id="summaryDateFrom" class="filter-input" type="date" value="${esc(summaryDateFrom)}"></label>
+          <label>Hasta<input id="summaryDateTo" class="filter-input" type="date" value="${esc(summaryDateTo)}"></label>
+          <label>Situación<select id="summarySituationFilter" class="filter-input">${msrOptions(summaryFilter,["all","PENDIENTE","RETRASO","EXPEDIDO PARCIAL","EXPEDIDO"])}</select></label>
+          <label>Estado<select id="summaryStateFilter" class="filter-input">${msrOptions(summaryStateFilter,["all","Pendiente","En proceso","Finalizado"])}</select></label>
+          <label>Envío<select id="summaryShippingFilter" class="filter-input">${msrOptions(summaryShippingFilter,["all","No","Parcial","Total"])}</select></label>
+          <label>Serval<select id="summaryServalFilter" class="filter-input">${msrOptions(summaryServalFilter,["all","No","Si"])}</select></label>
+          <label class="wide-filter">IDs<input id="summaryIdsFilter" class="filter-input" placeholder="Ej.: 327, 367, 417" value="${esc(summaryIdsFilter.join(", "))}"></label>
+          <label>Ordenar por<select id="summarySortKey" class="filter-input">
+            <option value="planDateTime" ${summarySortKey==="planDateTime"?"selected":""}>Fecha + hora</option>
+            <option value="date" ${summarySortKey==="date"?"selected":""}>Fecha</option>
+            <option value="time" ${summarySortKey==="time"?"selected":""}>Hora</option>
+            <option value="id" ${summarySortKey==="id"?"selected":""}>ID</option>
+            <option value="situation" ${summarySortKey==="situation"?"selected":""}>Situación</option>
+            <option value="status" ${summarySortKey==="status"?"selected":""}>Estado</option>
+            <option value="shipping" ${summarySortKey==="shipping"?"selected":""}>Envío</option>
+            <option value="serval" ${summarySortKey==="serval"?"selected":""}>Serval</option>
+            <option value="remaining" ${summarySortKey==="remaining"?"selected":""}>Pallets restantes</option>
+            <option value="total" ${summarySortKey==="total"?"selected":""}>Pallets total</option>
+            <option value="sent" ${summarySortKey==="sent"?"selected":""}>Pallets enviados</option>
+          </select></label>
+          <label>Dirección<select id="summarySortDir" class="filter-input"><option value="asc" ${summarySortDir==="asc"?"selected":""}>Ascendente</option><option value="desc" ${summarySortDir==="desc"?"selected":""}>Descendente</option></select></label>
+        </div>
+
+        <div class="quick-filters">
+          <button class="btn ${summaryFilter==="all"?"primary":"ghost"}" data-summary-filter="all">Todas</button>
+          <button class="btn ${summaryFilter==="PENDIENTE"?"primary":"ghost"}" data-summary-filter="PENDIENTE">Pendientes</button>
+          <button class="btn ${summaryFilter==="RETRASO"?"primary":"ghost"}" data-summary-filter="RETRASO">Retrasos</button>
+          <button class="btn ${summaryFilter==="EXPEDIDO PARCIAL"?"primary":"ghost"}" data-summary-filter="EXPEDIDO PARCIAL">Parciales</button>
+          <button class="btn ${summaryFilter==="EXPEDIDO"?"primary":"ghost"}" data-summary-filter="EXPEDIDO">Expedidas</button>
+        </div>
+
         <div class="table-wrap">${tableOrders(rows)}</div>
       </div>`;
   }
@@ -353,7 +443,6 @@
   function render(){
     if(page==="inicio")renderInicio();
     if(page==="resumen")renderResumen();
-    if(page==="estados")renderEstados();
     if(page==="hce")renderHCE();
     if(page==="import-msr")renderImport("msr");
     if(page==="import-hce")renderImport("hce");
@@ -363,9 +452,44 @@
 
   function bindPage(){
     document.querySelectorAll("[data-go]").forEach(x=>x.onclick=()=>go(x.dataset.go));
-    document.querySelectorAll("[data-edit-id]").forEach(x=>x.onclick=()=>openState(x.dataset.editId));
     document.querySelectorAll("[data-summary-filter]").forEach(x=>x.onclick=()=>{summaryFilter=x.dataset.summaryFilter;render()});
     const sdf=$("#summaryDateFilter"); if(sdf)sdf.onchange=()=>{summaryDateFilter=sdf.value;render()};
+    const sfrom=$("#summaryDateFrom"); if(sfrom)sfrom.onchange=()=>{summaryDateFrom=sfrom.value;summaryDateFilter="all";render()};
+    const sto=$("#summaryDateTo"); if(sto)sto.onchange=()=>{summaryDateTo=sto.value;summaryDateFilter="all";render()};
+    const ssit=$("#summarySituationFilter"); if(ssit)ssit.onchange=()=>{summaryFilter=ssit.value;render()};
+    const sstate=$("#summaryStateFilter"); if(sstate)sstate.onchange=()=>{summaryStateFilter=sstate.value;render()};
+    const sship=$("#summaryShippingFilter"); if(sship)sship.onchange=()=>{summaryShippingFilter=sship.value;render()};
+    const sserv=$("#summaryServalFilter"); if(sserv)sserv.onchange=()=>{summaryServalFilter=sserv.value;render()};
+    const sids=$("#summaryIdsFilter"); if(sids)sids.onchange=()=>{summaryIdsFilter=[...new Set(sids.value.split(/[\s,;|]+/).map(idNorm).filter(Boolean))];render()};
+    const skey=$("#summarySortKey"); if(skey)skey.onchange=()=>{summarySortKey=skey.value;render()};
+    const sdir=$("#summarySortDir"); if(sdir)sdir.onchange=()=>{summarySortDir=sdir.value;render()};
+    const sreset=$("#resetSummaryFilters"); if(sreset)sreset.onclick=()=>{
+      summaryFilter="all";summaryDateFilter="all";summaryDateFrom="";summaryDateTo="";summaryStateFilter="all";summaryShippingFilter="all";summaryServalFilter="all";summaryIdsFilter=[];summarySortKey="planDateTime";summarySortDir="asc";render();
+    };
+
+    document.querySelectorAll("[data-msr-id][data-msr-field]").forEach(el=>{
+      el.addEventListener("change",()=>{
+        const id=idNorm(el.dataset.msrId),field=el.dataset.msrField;
+        const s=stateFor(id);
+        const proposed=el.value;
+        if((field==="total" || field==="sent")){
+          const total=Number(field==="total"?proposed:s.total);
+          const sent=Number(field==="sent"?proposed:s.sent);
+          if(proposed!=="" && Number.isFinite(total) && Number.isFinite(sent) && sent>total){
+            toast("Pallets enviados no puede superar pallets total",true);
+            render();return;
+          }
+        }
+        s[field]=proposed;
+        s.updatedAt=nowISO();
+        save();
+        if(field==="shipping" && proposed==="Total")alert("ENVÍO TOTAL: recuerda cerrar la orden de carga en SHP.");
+        if(field==="shipping" && proposed==="Parcial")alert(`ENVÍO PARCIAL: quedan ${palletsLeft(s)} pallets.`);
+        if(field==="serval" && proposed==="Si" && !String(s.comment||"").trim())toast("Serval = Si: añade comentario",true);
+        toast("MSR guardado");
+        render();
+      });
+    });
     document.querySelectorAll("[data-hce-key][data-hce-field]").forEach(el=>{
       el.addEventListener("change",()=>{
         const key=el.dataset.hceKey, field=el.dataset.hceField;
