@@ -22,9 +22,20 @@
   let summaryStateFilter = "all";
   let summaryShippingFilter = "all";
   let summaryServalFilter = "all";
+  let summarySourceFilter = "all";
+  let summaryChainFilter = "all";
+  let summaryTextFilter = "";
   let summaryIdsFilter = [];
   let summarySortKey = "planDateTime";
   let summarySortDir = "asc";
+  let dashboardDate = today();
+  let hceDateFrom = "";
+  let hceDateTo = "";
+  let hceProcessFilter = "all";
+  let hceTimingFilter = "all";
+  let hceTransporterFilter = "all";
+  let hceSortKey = "planDateTime";
+  let hceSortDir = "asc";
 
   const $ = s => document.querySelector(s);
   const content = $("#content");
@@ -39,6 +50,7 @@
     db.meta.updatedAt = new Date().toISOString();
     localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
     window.dispatchEvent(new CustomEvent("msr-data-changed"));
+    if(window.MSRCloud?.enabled) window.MSRCloud.save(db).catch(err=>console.warn("Cloud save",err));
   }
   function toast(msg, error=false) {
     const el=$("#toast"); el.textContent=msg; el.className="toast show"+(error?" error":"");
@@ -156,35 +168,85 @@
     return {total,sent,partial,late,left,htotal,unloaded,hpending:htotal-unloaded};
   }
 
+
   function renderInicio(){
-    const k=kpis(), recent=db.msr.slice().sort((a,b)=>(`${b.planDate}${b.planTime}`).localeCompare(`${a.planDate}${a.planTime}`)).slice(0,8);
+    const allMsr=orderRows();
+    const msr=allMsr.filter(({o})=>!dashboardDate || o.planDate===dashboardDate);
+    const hce=db.hce.filter(x=>!dashboardDate || x.planDate===dashboardDate);
+
+    const total=msr.length;
+    const expedidas=msr.filter(({o})=>situation(o)==="EXPEDIDO").length;
+    const parciales=msr.filter(({o})=>situation(o)==="EXPEDIDO PARCIAL").length;
+    const retrasos=msr.filter(({o})=>situation(o)==="RETRASO").length;
+    const pendientes=msr.filter(({o})=>["PENDIENTE","RETRASO"].includes(situation(o))).length;
+
+    const hceArrived=hce.filter(x=>x.realDate&&x.realTime);
+    const hceOnTime=hceArrived.filter(x=>hceTiming(x).hours<=0).length;
+    const hceLate=hceArrived.filter(x=>hceTiming(x).hours>0).length;
+    const hcePending=hce.filter(x=>!(x.realDate&&x.realTime)).length;
+
+    const msrRows=msr.slice().sort((a,b)=>(`${a.o.planDate}${a.o.planTime}`).localeCompare(`${b.o.planDate}${b.o.planTime}`));
+    const hceRows=hce.slice().sort((a,b)=>(`${a.planDate}${a.planTime}`).localeCompare(`${b.planDate}${b.planTime}`));
+
     content.innerHTML=`
-      <div class="grid kpis">
-        ${kpi("Órdenes MSR",k.total,"Total importadas")}
-        ${kpi("Expedidas",k.sent,"Envío total")}
-        ${kpi("Parciales",k.partial,`${k.left} pallets pendientes`)}
-        ${kpi("Retrasos",k.late,"Órdenes abiertas fuera de hora")}
-        ${kpi("Contenedores HCE",k.htotal,"Planificación cargada")}
-        ${kpi("Descargados",k.unloaded,"Proceso finalizado")}
-        ${kpi("Pendientes HCE",k.hpending,"Por finalizar")}
-        ${kpi("Última actualización",db.meta.updatedAt?new Date(db.meta.updatedAt).toLocaleTimeString("es-ES",{hour:"2-digit",minute:"2-digit"}):"—","Guardado local")}
+      <div class="dashboard-toolbar no-capture">
+        <div class="filters">
+          <label>Fecha del parte <input id="dashboardDate" class="filter-input" type="date" value="${esc(dashboardDate)}"></label>
+          <button class="btn ghost" id="dashboardToday">Hoy</button>
+          <button class="btn primary" id="captureModeBtn">📸 Modo captura</button>
+          <button class="btn ghost" id="printDashboardBtn">🖨 Imprimir / PDF</button>
+        </div>
       </div>
-      <div class="grid two-col">
-        <div class="panel">
-          <div class="panel-head"><div><h2>Prioridad MSR</h2><p>Órdenes recientes y su situación actual.</p></div><button class="btn ghost" data-go="resumen">Ver resumen</button></div>
-          <div class="table-wrap">${tableOrders(recent,true)}</div>
-        </div>
-        <div class="panel">
-          <div class="panel-head"><div><h2>Estado HCE</h2><p>Lectura rápida de la recepción del día.</p></div><button class="btn ghost" data-go="hce">Ver HCE</button></div>
-          <div class="grid mini-cards">
-            <div class="mini"><strong>${k.htotal}</strong><small>Previstos</small></div>
-            <div class="mini"><strong>${k.unloaded}</strong><small>Descargados</small></div>
-            <div class="mini"><strong>${k.hpending}</strong><small>Pendientes</small></div>
+
+      <section class="report-card">
+        <div class="report-head">
+          <div>
+            <div class="eyebrow">PARTE OPERATIVO · MSR / HCE</div>
+            <h2>${dashboardDate?fmtDate(dashboardDate):"Todas las fechas"}</h2>
           </div>
-          <div class="statline"><span style="width:${k.htotal?Math.round(k.unloaded/k.htotal*100):0}%"></span></div>
-          <div class="notice" style="margin-top:16px">La app conserva los estados por ID aunque vuelvas a importar el MSR. La importación actualiza planificación, no borra tu histórico manual.</div>
+          <div class="report-updated">Actualizado ${new Date().toLocaleString("es-ES")}</div>
         </div>
-      </div>`;
+
+        <div class="section-title">Órdenes MSR</div>
+        <div class="grid report-kpis">
+          ${kpi("Órdenes",total,"Planificadas")}
+          ${kpi("Pendientes",pendientes,"Incluye retrasos abiertos")}
+          ${kpi("Parciales",parciales,"Envíos incompletos")}
+          ${kpi("Expedidas",expedidas,"Envío total")}
+          ${kpi("Retrasos",retrasos,"Fuera de hora")}
+        </div>
+
+        <div class="table-wrap report-table">
+          <table class="data-table">
+            <thead><tr><th>Situación</th><th>Fecha</th><th>Hora</th><th>ID</th><th>Estado</th><th>Envío</th><th>Cumplimiento</th></tr></thead>
+            <tbody>${msrRows.length?msrRows.map(({o,s})=>`<tr>
+              <td>${badge(situation(o))}</td><td>${fmtDate(o.planDate)}</td><td>${fmtTime(o.planTime)}</td>
+              <td><strong>${esc(o.id)}</strong></td><td>${badge(s.status||"Pendiente")}</td><td>${badge(s.shipping||"No")}</td>
+              <td class="wrap">${esc(timing(o,s))}</td>
+            </tr>`).join(""):`<tr><td colspan="7" class="empty">Sin órdenes para esta fecha.</td></tr>`}</tbody>
+          </table>
+        </div>
+
+        <div class="section-title hce-title">Contenedores HCE · cumplimiento horario</div>
+        <div class="grid report-kpis hce-kpis">
+          ${kpi("Previstos",hce.length,"Contenedores")}
+          ${kpi("Llegados a tiempo",hceOnTime,"Con hora real")}
+          ${kpi("Llegados tarde",hceLate,"Con hora real")}
+          ${kpi("Pendientes",hcePending,"Sin hora real")}
+        </div>
+
+        <div class="table-wrap report-table">
+          <table class="data-table">
+            <thead><tr><th>Contenedor</th><th>Previsto</th><th>Hora real</th><th>Cumplimiento</th></tr></thead>
+            <tbody>${hceRows.length?hceRows.map(x=>`<tr>
+              <td><strong>${esc(x.number||x.entryId)}</strong></td>
+              <td>${fmtDate(x.planDate)} · ${fmtTime(x.planTime)}</td>
+              <td>${x.realDate?fmtDate(x.realDate)+" · "+fmtTime(x.realTime):"—"}</td>
+              <td>${timeBadge(hceTiming(x))}</td>
+            </tr>`).join(""):`<tr><td colspan="4" class="empty">Sin contenedores para esta fecha.</td></tr>`}</tbody>
+          </table>
+        </div>
+      </section>`;
   }
   function kpi(label,value,hint){return `<div class="kpi"><small>${label}</small><strong>${esc(value)}</strong><div class="hint">${hint}</div></div>`}
 
@@ -209,6 +271,10 @@
       if(summarySortKey==="remaining")return Number(palletsLeft(s))||0;
       if(summarySortKey==="total")return Number(s.total)||0;
       if(summarySortKey==="sent")return Number(s.sent)||0;
+      if(summarySortKey==="loadOT")return o.loadOT||"";
+      if(summarySortKey==="store")return o.store||"";
+      if(summarySortKey==="chain")return o.chain||"";
+      if(summarySortKey==="sendDateTime")return `${s.date||""} ${s.time||""}`;
       return "";
     };
     return rows.sort((a,b)=>{
@@ -259,10 +325,18 @@
     if(summaryStateFilter!=="all") rows=rows.filter(({s})=>(s.status||"Pendiente")===summaryStateFilter);
     if(summaryShippingFilter!=="all") rows=rows.filter(({s})=>(s.shipping||"No")===summaryShippingFilter);
     if(summaryServalFilter!=="all") rows=rows.filter(({s})=>(s.serval||"No")===summaryServalFilter);
+    if(summarySourceFilter!=="all") rows=rows.filter(({o})=>(o.sourceStatus||"")===summarySourceFilter);
+    if(summaryChainFilter!=="all") rows=rows.filter(({o})=>(o.chain||"")===summaryChainFilter);
     if(summaryIdsFilter.length) rows=rows.filter(({o})=>summaryIdsFilter.includes(idNorm(o.id)));
+    if(summaryTextFilter){
+      const q=norm(summaryTextFilter);
+      rows=rows.filter(({o,s})=>norm([o.id,o.loadOT,o.description,o.store,o.chain,o.sourceStatus,s.comment].join(" ")).includes(q));
+    }
     rows=sortSummaryRows(rows);
 
     const dates=[...new Set(db.msr.map(o=>o.planDate).filter(Boolean))].sort();
+    const sourceStatuses=[...new Set(db.msr.map(o=>o.sourceStatus).filter(Boolean))].sort();
+    const chains=[...new Set(db.msr.map(o=>o.chain).filter(Boolean))].sort();
     content.innerHTML=`
       <div class="panel" style="margin-top:0">
         <div class="panel-head">
@@ -278,7 +352,10 @@
           <label>Estado<select id="summaryStateFilter" class="filter-input">${msrOptions(summaryStateFilter,["all","Pendiente","En proceso","Finalizado"])}</select></label>
           <label>Envío<select id="summaryShippingFilter" class="filter-input">${msrOptions(summaryShippingFilter,["all","No","Parcial","Total"])}</select></label>
           <label>Serval<select id="summaryServalFilter" class="filter-input">${msrOptions(summaryServalFilter,["all","No","Si"])}</select></label>
+          <label>Estado origen<select id="summarySourceFilter" class="filter-input"><option value="all">Todos</option>${sourceStatuses.map(v=>`<option value="${esc(v)}" ${summarySourceFilter===v?"selected":""}>${esc(v)}</option>`).join("")}</select></label>
+          <label>Cadena<select id="summaryChainFilter" class="filter-input"><option value="all">Todas</option>${chains.map(v=>`<option value="${esc(v)}" ${summaryChainFilter===v?"selected":""}>${esc(v)}</option>`).join("")}</select></label>
           <label class="wide-filter">IDs<input id="summaryIdsFilter" class="filter-input" placeholder="Ej.: 327, 367, 417" value="${esc(summaryIdsFilter.join(", "))}"></label>
+          <label class="wide-filter">Buscar<input id="summaryTextFilter" class="filter-input" placeholder="ID, OT, tienda, comentario..." value="${esc(summaryTextFilter)}"></label>
           <label>Ordenar por<select id="summarySortKey" class="filter-input">
             <option value="planDateTime" ${summarySortKey==="planDateTime"?"selected":""}>Fecha + hora</option>
             <option value="date" ${summarySortKey==="date"?"selected":""}>Fecha</option>
@@ -291,6 +368,10 @@
             <option value="remaining" ${summarySortKey==="remaining"?"selected":""}>Pallets restantes</option>
             <option value="total" ${summarySortKey==="total"?"selected":""}>Pallets total</option>
             <option value="sent" ${summarySortKey==="sent"?"selected":""}>Pallets enviados</option>
+            <option value="loadOT" ${summarySortKey==="loadOT"?"selected":""}>OT carga</option>
+            <option value="store" ${summarySortKey==="store"?"selected":""}>Tienda</option>
+            <option value="chain" ${summarySortKey==="chain"?"selected":""}>Cadena</option>
+            <option value="sendDateTime" ${summarySortKey==="sendDateTime"?"selected":""}>Fecha/hora envío</option>
           </select></label>
           <label>Dirección<select id="summarySortDir" class="filter-input"><option value="asc" ${summarySortDir==="asc"?"selected":""}>Ascendente</option><option value="desc" ${summarySortDir==="desc"?"selected":""}>Descendente</option></select></label>
         </div>
@@ -310,6 +391,26 @@
 
 
 
+
+  function hceTiming(c){
+    const p=dt(c.planDate,c.planTime);
+    if(!p)return {label:"SIN PREVISIÓN",hours:null,kind:"gray"};
+    const a=dt(c.realDate,c.realTime);
+    const ref=a||new Date();
+    const h=(ref-p)/36e5;
+    if(a){
+      if(h<=0)return {label:`A TIEMPO · ${Math.abs(h).toFixed(1)} h antes`,hours:h,kind:"green"};
+      return {label:`TARDE · ${h.toFixed(1)} h`,hours:h,kind:"red"};
+    }
+    if(h>0)return {label:`RETRASO · ${h.toFixed(1)} h`,hours:h,kind:"red"};
+    return {label:`FALTAN ${Math.abs(h).toFixed(1)} h`,hours:h,kind:"blue"};
+  }
+
+  function timeBadge(info){
+    const cls=info.kind==="green"?"b-green":info.kind==="red"?"b-red":info.kind==="blue"?"b-blue":"b-gray";
+    return `<span class="badge ${cls}">${esc(info.label)}</span>`;
+  }
+
   function containerStatus(c){
     if(c.process==="Descargado")return "Descargado";
     if(c.process==="Descargando")return "Descargando";
@@ -318,12 +419,45 @@
     return p && new Date()>p?"Retraso":"Pendiente de recibir";
   }
   function renderHCE(){
-    const rows=db.hce.slice().sort((a,b)=>(`${a.planDate}${a.planTime}`).localeCompare(`${b.planDate}${b.planTime}`));
+    let rows=db.hce.slice();
+    if(hceDateFrom)rows=rows.filter(x=>x.planDate&&x.planDate>=hceDateFrom);
+    if(hceDateTo)rows=rows.filter(x=>x.planDate&&x.planDate<=hceDateTo);
+    if(hceProcessFilter!=="all")rows=rows.filter(x=>(x.process||"Pendiente de recibir")===hceProcessFilter);
+    if(hceTransporterFilter!=="all")rows=rows.filter(x=>(x.transporter||"")===hceTransporterFilter);
+    if(hceTimingFilter!=="all"){
+      rows=rows.filter(x=>{
+        const t=hceTiming(x);
+        if(hceTimingFilter==="late")return t.kind==="red";
+        if(hceTimingFilter==="ontime")return x.realDate&&x.realTime&&t.kind==="green";
+        if(hceTimingFilter==="pending")return !(x.realDate&&x.realTime);
+        return true;
+      });
+    }
+    const hceSortVal=x=>{
+      if(hceSortKey==="planDateTime")return `${x.planDate||""} ${x.planTime||""}`;
+      if(hceSortKey==="number")return x.number||"";
+      if(hceSortKey==="process")return x.process||"";
+      if(hceSortKey==="transporter")return x.transporter||"";
+      if(hceSortKey==="timing")return hceTiming(x).hours??0;
+      if(hceSortKey==="qty")return Number(x.plannedQty)||0;
+      return "";
+    };
+    rows.sort((a,b)=>{const va=hceSortVal(a),vb=hceSortVal(b);const cmp=typeof va==="number"?va-vb:String(va).localeCompare(String(vb),"es",{numeric:true});return hceSortDir==="desc"?-cmp:cmp;});
+    const transporters=[...new Set(db.hce.map(x=>x.transporter).filter(Boolean))].sort();
     content.innerHTML=`
       <div class="panel" style="margin-top:0">
         <div class="panel-head">
           <div><h2>Contenedores HCE</h2><p>Rellena directamente cada fila. Los cambios se guardan automáticamente.</p></div>
-          <div class="actions"><button class="btn danger" id="clearHCEBtn">🧹 Borrar HCE / nueva actualización</button></div>
+          <div class="actions"><button class="btn ghost" id="resetHCEFilters">Limpiar filtros</button><button class="btn danger" id="clearHCEBtn">🧹 Borrar HCE / nueva actualización</button></div>
+        </div>
+        <div class="hce-filter-grid">
+          <label>Desde<input id="hceDateFrom" class="filter-input" type="date" value="${esc(hceDateFrom)}"></label>
+          <label>Hasta<input id="hceDateTo" class="filter-input" type="date" value="${esc(hceDateTo)}"></label>
+          <label>Proceso<select id="hceProcessFilter" class="filter-input">${msrOptions(hceProcessFilter,["all","Pendiente de recibir","Posicionado","Descargando","Descargado"])}</select></label>
+          <label>Cumplimiento<select id="hceTimingFilter" class="filter-input"><option value="all" ${hceTimingFilter==="all"?"selected":""}>Todos</option><option value="ontime" ${hceTimingFilter==="ontime"?"selected":""}>A tiempo</option><option value="late" ${hceTimingFilter==="late"?"selected":""}>Retraso</option><option value="pending" ${hceTimingFilter==="pending"?"selected":""}>Pendientes</option></select></label>
+          <label>Transportista<select id="hceTransporterFilter" class="filter-input"><option value="all">Todos</option>${transporters.map(v=>`<option value="${esc(v)}" ${hceTransporterFilter===v?"selected":""}>${esc(v)}</option>`).join("")}</select></label>
+          <label>Ordenar<select id="hceSortKey" class="filter-input"><option value="planDateTime" ${hceSortKey==="planDateTime"?"selected":""}>Fecha + hora</option><option value="number" ${hceSortKey==="number"?"selected":""}>Contenedor</option><option value="process" ${hceSortKey==="process"?"selected":""}>Proceso</option><option value="transporter" ${hceSortKey==="transporter"?"selected":""}>Transportista</option><option value="timing" ${hceSortKey==="timing"?"selected":""}>Cumplimiento</option><option value="qty" ${hceSortKey==="qty"?"selected":""}>Cantidad</option></select></label>
+          <label>Dirección<select id="hceSortDir" class="filter-input"><option value="asc" ${hceSortDir==="asc"?"selected":""}>Ascendente</option><option value="desc" ${hceSortDir==="desc"?"selected":""}>Descendente</option></select></label>
         </div>
         <div class="table-wrap">${tableHCE(rows)}</div>
       </div>`;
@@ -334,9 +468,10 @@
 
   function tableHCE(rows){
     if(!rows.length)return `<div class="empty">No hay planificación HCE importada.</div>`;
-    return `<table class="data-table hce-table"><thead><tr><th>Estado</th><th>Contenedor</th><th>ID entrada</th><th>Fecha prev.</th><th>Hora</th><th>Cantidad plan.</th><th>Transportista</th><th>Fecha real</th><th>Hora real</th><th>Proceso</th><th>Muelle</th><th>Matriculado</th><th>Ubicado</th><th>5%</th><th>Muestra</th><th>Comentario</th></tr></thead>
+    return `<table class="data-table hce-table"><thead><tr><th>Estado</th><th>Cumplimiento</th><th>Contenedor</th><th>ID entrada</th><th>Fecha prev.</th><th>Hora</th><th>Cantidad plan.</th><th>Transportista</th><th>Fecha real</th><th>Hora real</th><th>Proceso</th><th>Muelle</th><th>Matriculado</th><th>Ubicado</th><th>5%</th><th>Muestra</th><th>Comentario</th></tr></thead>
       <tbody>${rows.map(c=>`<tr>
         <td class="hce-status">${badge(containerStatus(c))}</td>
+        <td>${timeBadge(hceTiming(c))}</td>
         <td><strong>${esc(c.number)}</strong></td>
         <td class="wrap">${esc(c.entryId)}</td>
         <td>${fmtDate(c.planDate)}</td>
@@ -428,11 +563,14 @@
     const sstate=$("#summaryStateFilter"); if(sstate)sstate.onchange=()=>{summaryStateFilter=sstate.value;render()};
     const sship=$("#summaryShippingFilter"); if(sship)sship.onchange=()=>{summaryShippingFilter=sship.value;render()};
     const sserv=$("#summaryServalFilter"); if(sserv)sserv.onchange=()=>{summaryServalFilter=sserv.value;render()};
+    const ssource=$("#summarySourceFilter"); if(ssource)ssource.onchange=()=>{summarySourceFilter=ssource.value;render()};
+    const schain=$("#summaryChainFilter"); if(schain)schain.onchange=()=>{summaryChainFilter=schain.value;render()};
+    const stext=$("#summaryTextFilter"); if(stext)stext.onchange=()=>{summaryTextFilter=stext.value;render()};
     const sids=$("#summaryIdsFilter"); if(sids)sids.onchange=()=>{summaryIdsFilter=[...new Set(sids.value.split(/[\s,;|]+/).map(idNorm).filter(Boolean))];render()};
     const skey=$("#summarySortKey"); if(skey)skey.onchange=()=>{summarySortKey=skey.value;render()};
     const sdir=$("#summarySortDir"); if(sdir)sdir.onchange=()=>{summarySortDir=sdir.value;render()};
     const sreset=$("#resetSummaryFilters"); if(sreset)sreset.onclick=()=>{
-      summaryFilter="all";summaryDateFilter="all";summaryDateFrom="";summaryDateTo="";summaryStateFilter="all";summaryShippingFilter="all";summaryServalFilter="all";summaryIdsFilter=[];summarySortKey="planDateTime";summarySortDir="asc";render();
+      summaryFilter="all";summaryDateFilter="all";summaryDateFrom="";summaryDateTo="";summaryStateFilter="all";summaryShippingFilter="all";summaryServalFilter="all";summarySourceFilter="all";summaryChainFilter="all";summaryTextFilter="";summaryIdsFilter=[];summarySortKey="planDateTime";summarySortDir="asc";render();
     };
 
     document.querySelectorAll("[data-msr-id][data-msr-field]").forEach(el=>{
@@ -448,7 +586,28 @@
             render();return;
           }
         }
+        const snapshot={...s};
         s[field]=proposed;
+
+        if((s.date&&!s.time)||(!s.date&&s.time)){
+          Object.assign(s,snapshot);toast("Fecha y hora de envío deben completarse juntas",true);render();return;
+        }
+        if(s.shipping==="Parcial"){
+          const total=Number(s.total),sent=Number(s.sent);
+          if(!s.total||!s.sent||!Number.isFinite(total)||!Number.isFinite(sent)||sent<=0||sent>=total){
+            Object.assign(s,snapshot);toast("Parcial requiere pallets total y enviados, y enviados debe ser menor que total",true);render();return;
+          }
+        }
+        if(s.shipping==="Total" && s.total!=="" && s.sent!=="" && Number(s.sent)!==Number(s.total)){
+          Object.assign(s,snapshot);toast("Envío Total: pallets enviados debe coincidir con pallets total",true);render();return;
+        }
+        if(s.status==="Finalizado" && (s.shipping==="No"||!s.date||!s.time)){
+          Object.assign(s,snapshot);toast("Para Finalizado indica envío y fecha/hora real",true);render();return;
+        }
+        if(s.serval==="Si" && !String(s.comment||"").trim() && field!=="comment"){
+          toast("Serval = Si: añade comentario",true);
+        }
+
         s.updatedAt=nowISO();
         save();
         if(field==="shipping" && proposed==="Total")alert("ENVÍO TOTAL: recuerda cerrar la orden de carga en SHP.");
@@ -458,12 +617,34 @@
         render();
       });
     });
+
+    const dd=$("#dashboardDate"); if(dd)dd.onchange=()=>{dashboardDate=dd.value;render()};
+    const dtoday=$("#dashboardToday"); if(dtoday)dtoday.onclick=()=>{dashboardDate=today();render()};
+    const capture=$("#captureModeBtn"); if(capture)capture.onclick=()=>document.body.classList.toggle("capture-mode");
+    const printBtn=$("#printDashboardBtn"); if(printBtn)printBtn.onclick=()=>window.print();
+
+    const hf=$("#hceDateFrom"); if(hf)hf.onchange=()=>{hceDateFrom=hf.value;render()};
+    const ht=$("#hceDateTo"); if(ht)ht.onchange=()=>{hceDateTo=ht.value;render()};
+    const hpfilter=$("#hceProcessFilter"); if(hpfilter)hpfilter.onchange=()=>{hceProcessFilter=hpfilter.value;render()};
+    const htfilter=$("#hceTimingFilter"); if(htfilter)htfilter.onchange=()=>{hceTimingFilter=htfilter.value;render()};
+    const htrans=$("#hceTransporterFilter"); if(htrans)htrans.onchange=()=>{hceTransporterFilter=htrans.value;render()};
+    const hsort=$("#hceSortKey"); if(hsort)hsort.onchange=()=>{hceSortKey=hsort.value;render()};
+    const hdir=$("#hceSortDir"); if(hdir)hdir.onchange=()=>{hceSortDir=hdir.value;render()};
+    const hreset=$("#resetHCEFilters"); if(hreset)hreset.onclick=()=>{hceDateFrom="";hceDateTo="";hceProcessFilter="all";hceTimingFilter="all";hceTransporterFilter="all";hceSortKey="planDateTime";hceSortDir="asc";render()};
+
     document.querySelectorAll("[data-hce-key][data-hce-field]").forEach(el=>{
       el.addEventListener("change",()=>{
         const key=el.dataset.hceKey, field=el.dataset.hceField;
         const item=db.hce.find(x=>x.key===key);
         if(!item)return;
+        const snapshot={...item};
         item[field]=el.value;
+        if((item.realDate&&!item.realTime)||(!item.realDate&&item.realTime)){
+          Object.assign(item,snapshot);toast("Fecha real y hora real deben completarse juntas",true);render();return;
+        }
+        if(item.process==="Descargado" && (!item.realDate||!item.realTime)){
+          Object.assign(item,snapshot);toast("Para marcar Descargado introduce fecha y hora real",true);render();return;
+        }
         item.updatedAt=nowISO();
         save();
 
@@ -497,7 +678,7 @@
     const reset=$("#resetBtn");if(reset)reset.onclick=()=>{
       if(!confirm("¿Borrar TODOS los datos de MSR, estados y HCE?"))return;
       if(!confirm("Confirmación final. ¿Borrar absolutamente todo?"))return;
-      db=defaultData();save();toast("Datos eliminados");render();
+      db=defaultData();save();if(window.MSRCloud?.enabled)window.MSRCloud.clear().catch(console.warn);toast("Datos eliminados");render();
     };
   }
 
@@ -714,5 +895,21 @@
   window.addEventListener("storage",e=>{if(e.key===STORAGE_KEY){db=load();render()}});
   if("serviceWorker" in navigator)window.addEventListener("load",()=>navigator.serviceWorker.register("./sw.js").catch(console.warn));
 
+  async function bootstrapCloud(){
+    if(!window.MSRCloud?.enabled)return;
+    try{
+      const cloud=await window.MSRCloud.load();
+      if(cloud && cloud.version){
+        db=cloud;
+        localStorage.setItem(STORAGE_KEY,JSON.stringify(db));
+        render();
+        toast("Datos sincronizados desde la nube");
+      }else{
+        await window.MSRCloud.save(db);
+      }
+    }catch(err){console.warn("Cloud load",err);toast("Nube no disponible: usando copia local",true);}
+  }
+
   const initial=location.hash.replace("#",""); go(pages[initial]?initial:"inicio");
+  bootstrapCloud();
 })();
