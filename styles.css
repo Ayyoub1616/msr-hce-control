@@ -27,3 +27,10 @@ main{min-width:0}.topbar{height:82px;background:rgba(255,255,255,.9);backdrop-fi
 @media(max-width:760px){
   #app{display:block}.sidebar{position:fixed;left:-270px;z-index:20;width:245px;transition:.2s}.sidebar.open{left:0}.mobile-only{display:inline-block}.topbar{padding:12px 14px;height:auto}.content{padding:16px 12px 35px}.top-actions .btn{padding:8px}.topbar p{display:none}.kpis,.mini-cards{grid-template-columns:1fr}.form-grid{grid-template-columns:1fr}.span-2{grid-column:auto}.ids-input{min-width:100%!important}.data-table{font-size:12px}
 }
+.hce-table td{padding:7px 6px}
+.hce-edit{border:1px solid #cbd5e1;border-radius:8px;background:#fff;color:var(--ink);padding:7px 8px;min-height:34px}
+.hce-edit:focus{outline:2px solid #bae6fd;border-color:#38bdf8}
+.hce-date{width:145px}.hce-time{width:100px}.hce-dock{width:90px}
+.hce-select{min-width:110px}.hce-sample{min-width:145px}
+.hce-comment{width:210px;min-width:210px;resize:vertical}
+.hce-status{min-width:120px}
