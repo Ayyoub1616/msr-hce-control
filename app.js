@@ -35,6 +35,8 @@
   let hceSortKey = "planDateTime";
   let hceSortDir = "asc";
   let adminNotice = "";
+  let adminSession = false;
+  let adminModalSection = null;
   let cloudStatus = "checking";
   let lastSyncAt = localStorage.getItem("msr_hce_last_sync") || null;
   let lastSyncError = "";
@@ -921,43 +923,42 @@
           </div>`:"<div class=\"import-clean\">Sin incidencias en la última importación.</div>"}
       </div>`:""}
 
-      <div class="panel admin-panel">
+      <div class="panel admin-panel admin-launcher">
         <div class="panel-head">
-          <div><h2>🔐 Centro de administrador</h2><p>Herramientas para localizar, corregir, recuperar o eliminar datos.</p></div>
-          <span class="admin-badge">Contraseña requerida</span>
+          <div>
+            <h2>🔐 Centro de administrador</h2>
+            <p>Entra por categoría. Dentro tendrás todas las herramientas relacionadas, sin botones dispersos.</p>
+          </div>
+          <span class="admin-badge">Acceso protegido</span>
         </div>
 
-        <div class="admin-help">
-          <span>🟢 Seguro: consultar/exportar</span>
-          <span>🟠 Precaución: reparar/sincronizar</span>
-          <span>🔴 Destructivo: borrar</span>
-        </div>
-
-        <div class="admin-grid">
-          <button class="admin-action safe" data-admin-action="inspect-id"><span>🔎</span><strong>Buscar una ID</strong><small>Ver si está activa y qué memoria tiene guardada</small></button>
-          <button class="admin-action warning" data-admin-action="edit-msr-id"><span>✏️</span><strong>Editar línea MSR por ID</strong><small>Corregir Orden de trabajo, Tienda, fecha/hora y datos operativos</small></button>
-          <button class="admin-action safe" data-admin-action="export-memory"><span>📤</span><strong>Exportar memoria</strong><small>Descarga todos los estados históricos</small></button>
-          <button class="admin-action safe" data-admin-action="diag"><span>🧪</span><strong>Diagnóstico completo</strong><small>Datos + último informe de importación</small></button>
-
-          <button class="admin-action warning" data-admin-action="pull"><span>☁️⬇️</span><strong>Nube → dispositivo</strong><small>Forzar descarga del estado compartido</small></button>
-          <button class="admin-action warning" data-admin-action="push"><span>☁️⬆️</span><strong>Dispositivo → nube</strong><small>Forzar esta copia como estado compartido</small></button>
-          <button class="admin-action warning" data-admin-action="repair"><span>🛠️</span><strong>Reparar estructura</strong><small>Normaliza IDs y elimina duplicados internos</small></button>
-          <button class="admin-action warning" data-admin-action="restore-undo"><span>↩️</span><strong>Deshacer último cambio admin</strong><small>Restaura el último punto automático</small></button>
-
-          <button class="admin-action danger-zone" data-admin-action="reset-id"><span>🧹</span><strong>Borrar memoria de ID</strong><small>Elimina solo su estado histórico guardado</small></button>
-          <button class="admin-action danger-zone" data-admin-action="delete-id-all"><span>🗑️</span><strong>Borrar ID por completo</strong><small>Elimina orden activa y memoria de esa ID</small></button>
-          <button class="admin-action danger-zone" data-admin-action="purge-orphans"><span>♻️</span><strong>Borrar memorias no activas</strong><small>Elimina estados de IDs que no están en el MSR actual</small></button>
-          <button class="admin-action danger-zone" data-admin-action="clear-msr"><span>📦</span><strong>Vaciar MSR</strong><small>Conserva todas las memorias por ID</small></button>
-          <button class="admin-action danger-zone" data-admin-action="clear-hce"><span>🚛</span><strong>Vaciar HCE</strong><small>Elimina planificación HCE actual</small></button>
+        <div class="admin-category-grid">
+          <button class="admin-category edit" data-admin-open="edit">
+            <span class="admin-category-icon">✏️</span>
+            <div><strong>Buscar y editar datos</strong><small>MSR por ID · HCE por matrícula · estados · fechas · tienda · comentarios</small></div>
+            <b>→</b>
+          </button>
+          <button class="admin-category repair" data-admin-open="repair">
+            <span class="admin-category-icon">🛠️</span>
+            <div><strong>Errores y reparación</strong><small>Incidencias de importación · duplicados · normalización · diagnóstico</small></div>
+            <b>→</b>
+          </button>
+          <button class="admin-category cloud" data-admin-open="cloud">
+            <span class="admin-category-icon">☁️</span>
+            <div><strong>Nube, copias y recuperación</strong><small>Forzar sincronización · backups · restaurar · deshacer cambios</small></div>
+            <b>→</b>
+          </button>
+          <button class="admin-category danger" data-admin-open="danger">
+            <span class="admin-category-icon">🗑️</span>
+            <div><strong>Borrados y limpieza</strong><small>Borrar memoria de ID · ID completa · vaciar MSR/HCE · limpieza avanzada</small></div>
+            <b>→</b>
+          </button>
         </div>
       </div>
 
-      <div class="panel danger-admin">
-        <div class="panel-head">
-          <div><h2>🚨 Borrado total protegido</h2><p>Último recurso. Elimina MSR, HCE, memoria histórica y estado compartido.</p></div>
-        </div>
-        <div class="notice danger">Requiere contraseña + doble confirmación. Descarga un backup antes de usarlo.</div>
-        <button class="btn danger" id="resetBtn">☢️ Borrar absolutamente todos los datos</button>
+      <div class="admin-safety-strip">
+        <span>🛡️</span>
+        <div><strong>Protección activa</strong><small>Las acciones destructivas crean un punto de recuperación y requieren confirmación.</small></div>
       </div>`;
   }
 
@@ -986,6 +987,324 @@
     };
   }
 
+  async function openAdminCenter(section="edit"){
+    if(!adminSession){
+      if(!(await adminAuth()))return;
+      adminSession=true;
+    }
+    adminModalSection=section;
+    renderAdminModal();
+  }
+
+  function closeAdminCenter(){
+    adminModalSection=null;
+    document.querySelector("#adminModal")?.remove();
+  }
+
+  function adminModalHeader(title,subtitle){
+    return `<div class="admin-modal-head">
+      <div>
+        <div class="admin-modal-eyebrow">🔐 CENTRO DE ADMINISTRADOR</div>
+        <h2>${title}</h2>
+        <p>${subtitle}</p>
+      </div>
+      <button class="admin-modal-close" id="adminModalClose" aria-label="Cerrar">✕</button>
+    </div>`;
+  }
+
+  function adminEditPanel(){
+    return `
+      <div class="admin-editor-search">
+        <div>
+          <label>Código / ID MSR</label>
+          <div class="admin-search-row">
+            <input id="adminMsrSearch" class="filter-input" placeholder="Ej. 282">
+            <button class="btn primary" id="adminMsrSearchBtn">🔎 Buscar MSR</button>
+          </div>
+        </div>
+        <div>
+          <label>Matrícula / contenedor HCE</label>
+          <div class="admin-search-row">
+            <input id="adminHceSearch" class="filter-input" placeholder="Ej. MSKU4731708">
+            <button class="btn primary" id="adminHceSearchBtn">🔎 Buscar HCE</button>
+          </div>
+        </div>
+      </div>
+      <div id="adminEditorResult" class="admin-editor-empty">
+        <span>👆</span>
+        <strong>Busca una ID o matrícula</strong>
+        <small>Se abrirá un formulario completo con todos sus datos editables.</small>
+      </div>`;
+  }
+
+  function adminRepairPanel(){
+    const r=db.meta?.lastImportReport;
+    const issues=r?[...(r.errors||[]).map(x=>({level:"error",...x})),...(r.warnings||[]).map(x=>({level:"warning",...x}))]:[];
+    return `
+      <div class="admin-section-summary">
+        <div><b>🧪 ${r?issues.length:0}</b><span>Incidencias última importación</span></div>
+        <div><b>💾 ${Object.keys(db.states||{}).length}</b><span>Memorias guardadas</span></div>
+        <div><b>📦 ${db.msr.length}</b><span>MSR actuales</span></div>
+        <div><b>🚛 ${db.hce.length}</b><span>HCE actuales</span></div>
+      </div>
+      <div class="admin-tool-row">
+        <button class="admin-tool-card" data-admin-run="repair"><span>🛠️</span><strong>Reparar estructura</strong><small>Normaliza IDs y elimina duplicados internos</small></button>
+        <button class="admin-tool-card" data-admin-run="diag"><span>🧪</span><strong>Descargar diagnóstico</strong><small>Exporta datos e incidencias para revisión</small></button>
+        <button class="admin-tool-card" data-admin-run="export-memory"><span>📤</span><strong>Exportar memoria</strong><small>Copia de todos los estados históricos MSR</small></button>
+      </div>
+      <div class="admin-modal-subsection">
+        <h3>🧾 Incidencias de la última importación</h3>
+        ${!r?`<div class="admin-editor-empty compact"><span>✅</span><strong>No hay informe reciente</strong></div>`
+        :!issues.length?`<div class="import-clean">✅ La última importación no tuvo incidencias.</div>`
+        :`<div class="issue-list admin-modal-issues">${issues.slice(0,100).map(x=>`
+          <div class="issue-item ${x.level}">
+            <b>${x.level==="error"?"❌":"⚠️"} Línea ${x.line}</b>
+            <span>${esc(x.message)}</span>
+            ${x.value?`<code>${esc(x.value)}</code>`:""}
+          </div>`).join("")}</div>`}
+      </div>`;
+  }
+
+  function adminCloudPanel(){
+    const undo=(()=>{try{return JSON.parse(localStorage.getItem(ADMIN_UNDO_KEY)||"null")}catch{return null}})();
+    return `
+      <div class="admin-section-summary">
+        <div><b>${cloudStatus==="online"?"🟢":"🔴"}</b><span>${cloudStatus==="online"?"Nube conectada":"Revisar conexión"}</span></div>
+        <div><b>🕒</b><span>Última sync: ${formatSyncTime(lastSyncAt)}</span></div>
+        <div><b>↩️</b><span>${undo?new Date(undo.at).toLocaleString("es-ES"):"Sin recuperación"}</span></div>
+      </div>
+      <div class="admin-tool-row">
+        <button class="admin-tool-card" data-admin-run="pull"><span>☁️⬇️</span><strong>Nube → dispositivo</strong><small>Descargar la copia compartida</small></button>
+        <button class="admin-tool-card" data-admin-run="push"><span>☁️⬆️</span><strong>Dispositivo → nube</strong><small>Forzar esta copia a todos</small></button>
+        <button class="admin-tool-card" id="adminBackupBtn"><span>💾</span><strong>Descargar backup</strong><small>JSON completo de seguridad</small></button>
+        <button class="admin-tool-card" id="adminRestoreBtn"><span>📥</span><strong>Restaurar backup</strong><small>Sustituir datos con una copia guardada</small></button>
+        <button class="admin-tool-card" data-admin-run="restore-undo"><span>↩️</span><strong>Deshacer último cambio admin</strong><small>Volver al punto automático anterior</small></button>
+      </div>
+      <input id="adminRestoreInput" type="file" accept=".json" hidden>`;
+  }
+
+  function adminDangerPanel(){
+    const active=new Set(db.msr.map(o=>idNorm(o.id)));
+    const orphan=Object.keys(db.states||{}).filter(id=>!active.has(id)).length;
+    return `
+      <div class="admin-danger-banner">🚨 Estas herramientas eliminan datos. Se crea un punto de recuperación antes de los cambios críticos.</div>
+      <div class="admin-danger-search">
+        <label>Borrar por ID concreta</label>
+        <div class="admin-search-row">
+          <input id="adminDeleteId" class="filter-input" placeholder="Código / ID MSR">
+          <button class="btn danger-soft" id="adminDeleteMemoryBtn">🧹 Solo memoria</button>
+          <button class="btn danger" id="adminDeleteFullBtn">🗑️ ID completa</button>
+        </div>
+      </div>
+      <div class="admin-tool-row">
+        <button class="admin-tool-card danger" data-admin-run="purge-orphans"><span>♻️</span><strong>Memorias no activas</strong><small>Borrar ${orphan} estados de IDs fuera del MSR actual</small></button>
+        <button class="admin-tool-card danger" data-admin-run="clear-msr"><span>📦</span><strong>Vaciar MSR</strong><small>Conserva memoria histórica</small></button>
+        <button class="admin-tool-card danger" data-admin-run="clear-hce"><span>🚛</span><strong>Vaciar HCE</strong><small>Elimina planificación HCE actual</small></button>
+        <button class="admin-tool-card nuclear" id="adminNuclearBtn"><span>☢️</span><strong>Borrado total</strong><small>MSR + HCE + memorias + nube</small></button>
+      </div>`;
+  }
+
+  function renderAdminModal(){
+    document.querySelector("#adminModal")?.remove();
+    const overlay=document.createElement("div");
+    overlay.id="adminModal";
+    overlay.className="admin-modal-overlay";
+    const section=adminModalSection||"edit";
+    const meta={
+      edit:["✏️ Buscar y editar datos","Corrige una línea completa en una sola pantalla."],
+      repair:["🛠️ Errores y reparación","Revisa importaciones, duplicados y estructura interna."],
+      cloud:["☁️ Nube, copias y recuperación","Sincronización, backups y puntos de recuperación."],
+      danger:["🗑️ Borrados y limpieza","Herramientas destructivas agrupadas y protegidas."]
+    }[section];
+    const body=section==="edit"?adminEditPanel():section==="repair"?adminRepairPanel():section==="cloud"?adminCloudPanel():adminDangerPanel();
+
+    overlay.innerHTML=`<div class="admin-modal-shell">
+      ${adminModalHeader(meta[0],meta[1])}
+      <div class="admin-modal-tabs">
+        <button data-admin-tab="edit" class="${section==="edit"?"active":""}">✏️ Editar</button>
+        <button data-admin-tab="repair" class="${section==="repair"?"active":""}">🛠️ Reparar</button>
+        <button data-admin-tab="cloud" class="${section==="cloud"?"active":""}">☁️ Nube/copias</button>
+        <button data-admin-tab="danger" class="${section==="danger"?"active danger":""}">🗑️ Borrados</button>
+      </div>
+      <div class="admin-modal-body">${body}</div>
+    </div>`;
+    document.body.appendChild(overlay);
+    bindAdminModal();
+  }
+
+  function renderMsrAdminEditor(id){
+    const k=idNorm(id);
+    const o=db.msr.find(x=>idNorm(x.id)===k);
+    const s=db.states?.[k]||stateFor(k);
+    const target=document.querySelector("#adminEditorResult");
+    if(!target)return;
+    if(!o){
+      target.className="admin-editor-empty";
+      target.innerHTML=`<span>❌</span><strong>ID ${esc(k)} no está en el MSR actual</strong><small>Puede existir solo en memoria histórica. Usa la pestaña Borrados si quieres gestionarla.</small>`;
+      return;
+    }
+    target.className="admin-editor-card";
+    target.innerHTML=`
+      <div class="admin-editor-title">
+        <div><span>📦 MSR</span><h3>ID ${esc(k)}</h3><small>Edición completa de la línea importada y su estado operativo.</small></div>
+        <span class="admin-editor-status">${esc(s.shipping||"No")}</span>
+      </div>
+      <div class="admin-form-grid">
+        <label class="wide">Orden de trabajo<input id="aeDescription" value="${esc(o.description||"")}"></label>
+        <label>Tienda<input id="aeStore" value="${esc(o.store||"")}"></label>
+        <label>Nº OT carga<input id="aeLoadOT" value="${esc(o.loadOT||"")}"></label>
+        <label>Fecha prevista<input id="aePlanDate" type="date" value="${esc(o.planDate||"")}"></label>
+        <label>Hora prevista<input id="aePlanTime" type="time" value="${esc(o.planTime||"")}"></label>
+        <label>Estado importado<input id="aeSourceStatus" value="${esc(o.sourceStatus||"")}"></label>
+        <label>Cadena<input id="aeChain" value="${esc(o.chain||"")}"></label>
+        <label>Envío<select id="aeShipping">${msrOptions(s.shipping||"No",["No","Parcial","Total"])}</select></label>
+        <label>Fecha expedición<input id="aeDate" type="date" value="${esc(s.date||"")}"></label>
+        <label>Hora expedición<input id="aeTime" type="time" value="${esc(s.time||"")}"></label>
+        <label>Serval<select id="aeServal">${msrOptions(s.serval||"No",["No","Si"])}</select></label>
+        <label class="wide">Comentario<textarea id="aeComment" rows="3">${esc(s.comment||"")}</textarea></label>
+      </div>
+      <div class="admin-editor-actions">
+        <button class="btn primary" id="adminSaveMsr" data-id="${esc(k)}">💾 Guardar cambios</button>
+        <button class="btn ghost" id="adminReloadMsr" data-id="${esc(k)}">↻ Descartar cambios</button>
+        <button class="btn danger-soft" id="adminMemoryFromEditor" data-id="${esc(k)}">🧹 Borrar memoria</button>
+        <button class="btn danger" id="adminDeleteFromEditor" data-id="${esc(k)}">🗑️ Eliminar ID completa</button>
+      </div>`;
+    bindMsrAdminEditor();
+  }
+
+  function renderHceAdminEditor(query){
+    const q=String(query||"").trim().toUpperCase();
+    const x=db.hce.find(x=>String(x.key||x.number||x.entryId||"").toUpperCase()===q || String(x.number||"").toUpperCase()===q || String(x.entryId||"").toUpperCase()===q);
+    const target=document.querySelector("#adminEditorResult");
+    if(!target)return;
+    if(!x){
+      target.className="admin-editor-empty";
+      target.innerHTML=`<span>❌</span><strong>No encuentro ese HCE</strong><small>Busca por matrícula, contenedor o ID entrada exacta.</small>`;
+      return;
+    }
+    target.className="admin-editor-card";
+    target.innerHTML=`
+      <div class="admin-editor-title">
+        <div><span>🚛 HCE</span><h3>${esc(x.number||x.entryId)}</h3><small>Corrección completa del contenedor/entrada.</small></div>
+        <span class="admin-editor-status">${esc(x.process||"Pendiente de recibir")}</span>
+      </div>
+      <div class="admin-form-grid">
+        <label>Matrícula / contenedor<input id="ahNumber" value="${esc(x.number||"")}"></label>
+        <label>ID entrada<input id="ahEntry" value="${esc(x.entryId||"")}"></label>
+        <label>Fecha prevista<input id="ahPlanDate" type="date" value="${esc(x.planDate||"")}"></label>
+        <label>Hora prevista<input id="ahPlanTime" type="time" value="${esc(x.planTime||"")}"></label>
+        <label>Fecha llegada<input id="ahRealDate" type="date" value="${esc(x.realDate||"")}"></label>
+        <label>Hora llegada<input id="ahRealTime" type="time" value="${esc(x.realTime||"")}"></label>
+        <label>Estado<select id="ahProcess">${msrOptions(x.process||"Pendiente de recibir",["Pendiente de recibir","Posicionado","Descargando","Descargado"])}</select></label>
+        <label>Transportista<input id="ahTransporter" value="${esc(x.transporter||"")}"></label>
+        <label class="wide">Razón / descripción<input id="ahReason" value="${esc(x.reason||"")}"></label>
+      </div>
+      <div class="admin-editor-actions">
+        <button class="btn primary" id="adminSaveHce" data-key="${esc(x.key)}">💾 Guardar cambios</button>
+        <button class="btn ghost" id="adminReloadHce" data-key="${esc(x.key)}">↻ Descartar cambios</button>
+      </div>`;
+    bindHceAdminEditor();
+  }
+
+  function bindMsrAdminEditor(){
+    const saveBtn=document.querySelector("#adminSaveMsr");
+    if(saveBtn)saveBtn.onclick=()=>{
+      const id=idNorm(saveBtn.dataset.id);
+      const o=db.msr.find(x=>idNorm(x.id)===id);
+      if(!o)return;
+      const s=stateFor(id);
+      const serval=document.querySelector("#aeServal").value;
+      const comment=document.querySelector("#aeComment").value.trim();
+      if(serval==="Si"&&!comment){toast("🚨 Serval = Sí requiere comentario obligatorio",true);return;}
+      const shipping=document.querySelector("#aeShipping").value;
+      const date=document.querySelector("#aeDate").value;
+      const time=document.querySelector("#aeTime").value;
+      if(shipping!=="No"&&(!date||!time)){toast("Completa fecha y hora de expedición",true);return;}
+
+      makeAdminSnapshot(`Antes de editar línea MSR ${id}`);
+      o.description=document.querySelector("#aeDescription").value.trim();
+      o.store=document.querySelector("#aeStore").value.trim();
+      o.loadOT=document.querySelector("#aeLoadOT").value.trim();
+      o.planDate=document.querySelector("#aePlanDate").value;
+      o.planTime=document.querySelector("#aePlanTime").value;
+      o.sourceStatus=document.querySelector("#aeSourceStatus").value.trim();
+      o.chain=document.querySelector("#aeChain").value.trim();
+      s.shipping=shipping;s.date=date;s.time=time;s.serval=serval;s.comment=comment;s.updatedAt=nowISO();
+      save();toast("✅ Línea MSR corregida y guardada");renderMsrAdminEditor(id);
+    };
+    const reload=document.querySelector("#adminReloadMsr");if(reload)reload.onclick=()=>renderMsrAdminEditor(reload.dataset.id);
+    const mem=document.querySelector("#adminMemoryFromEditor");if(mem)mem.onclick=async()=>{
+      const id=idNorm(mem.dataset.id);
+      if(!confirm(`¿Borrar solo la memoria de la ID ${id}?`))return;
+      makeAdminSnapshot(`Antes de borrar memoria ID ${id}`);delete db.states[id];save();toast("Memoria borrada");renderMsrAdminEditor(id);
+    };
+    const del=document.querySelector("#adminDeleteFromEditor");if(del)del.onclick=()=>{
+      const id=idNorm(del.dataset.id);
+      if(!confirm(`¿Eliminar por completo la ID ${id}?`))return;
+      makeAdminSnapshot(`Antes de eliminar ID ${id}`);db.msr=db.msr.filter(x=>idNorm(x.id)!==id);delete db.states[id];save();toast("ID eliminada");renderAdminModal();
+    };
+  }
+
+  function bindHceAdminEditor(){
+    const saveBtn=document.querySelector("#adminSaveHce");
+    if(saveBtn)saveBtn.onclick=()=>{
+      const x=db.hce.find(x=>x.key===saveBtn.dataset.key);if(!x)return;
+      const process=document.querySelector("#ahProcess").value;
+      const rd=document.querySelector("#ahRealDate").value,rt=document.querySelector("#ahRealTime").value;
+      if(process!=="Pendiente de recibir"&&(!rd||!rt)){toast("Para avanzar el estado HCE necesitas fecha y hora de llegada",true);return;}
+      makeAdminSnapshot(`Antes de editar HCE ${x.key}`);
+      x.number=document.querySelector("#ahNumber").value.trim();
+      x.entryId=document.querySelector("#ahEntry").value.trim();
+      x.planDate=document.querySelector("#ahPlanDate").value;x.planTime=document.querySelector("#ahPlanTime").value;
+      x.realDate=rd;x.realTime=rt;x.process=process;x.transporter=document.querySelector("#ahTransporter").value.trim();
+      x.reason=document.querySelector("#ahReason").value.trim();x.updatedAt=nowISO();
+      save();toast("✅ HCE corregido y guardado");renderHceAdminEditor(x.key);
+    };
+    const reload=document.querySelector("#adminReloadHce");if(reload)reload.onclick=()=>renderHceAdminEditor(reload.dataset.key);
+  }
+
+  function bindAdminModal(){
+    document.querySelector("#adminModalClose")?.addEventListener("click",closeAdminCenter);
+    document.querySelectorAll("[data-admin-tab]").forEach(btn=>btn.onclick=()=>{adminModalSection=btn.dataset.adminTab;renderAdminModal();});
+    document.querySelectorAll("[data-admin-run]").forEach(btn=>btn.onclick=()=>runAdminAction(btn.dataset.adminRun,true).then(()=>{if(document.querySelector("#adminModal"))renderAdminModal();}));
+
+    const msrSearch=document.querySelector("#adminMsrSearchBtn");
+    if(msrSearch)msrSearch.onclick=()=>renderMsrAdminEditor(document.querySelector("#adminMsrSearch").value);
+    const hceSearch=document.querySelector("#adminHceSearchBtn");
+    if(hceSearch)hceSearch.onclick=()=>renderHceAdminEditor(document.querySelector("#adminHceSearch").value);
+
+    const backup=document.querySelector("#adminBackupBtn");if(backup)backup.onclick=()=>download(`msr-hce-backup-${today()}.json`,JSON.stringify(db,null,2));
+    const restore=document.querySelector("#adminRestoreBtn"),ri=document.querySelector("#adminRestoreInput");
+    if(restore&&ri)restore.onclick=()=>ri.click();
+    if(ri)ri.onchange=e=>{
+      const f=e.target.files?.[0];if(!f)return;
+      const rd=new FileReader();
+      rd.onload=()=>{try{const x=JSON.parse(rd.result);if(!x.version)throw 0;makeAdminSnapshot("Antes de restaurar backup");db=x;save();toast("Backup restaurado");renderAdminModal()}catch{toast("Backup no válido",true)}};
+      rd.readAsText(f);
+    };
+
+    const delMem=document.querySelector("#adminDeleteMemoryBtn");
+    if(delMem)delMem.onclick=()=>{
+      const id=idNorm(document.querySelector("#adminDeleteId").value);if(!id)return;
+      if(!db.states[id]){toast("No hay memoria para esa ID",true);return;}
+      if(!confirm(`¿Borrar memoria de ID ${id}?`))return;
+      makeAdminSnapshot(`Antes de borrar memoria ID ${id}`);delete db.states[id];save();toast("Memoria eliminada");renderAdminModal();
+    };
+    const delFull=document.querySelector("#adminDeleteFullBtn");
+    if(delFull)delFull.onclick=()=>{
+      const id=idNorm(document.querySelector("#adminDeleteId").value);if(!id)return;
+      if(!db.states[id]&&!db.msr.some(x=>idNorm(x.id)===id)){toast("No existe esa ID",true);return;}
+      if(!confirm(`¿Eliminar por completo la ID ${id}?`))return;
+      makeAdminSnapshot(`Antes de eliminar ID ${id}`);db.msr=db.msr.filter(x=>idNorm(x.id)!==id);delete db.states[id];save();toast("ID eliminada");renderAdminModal();
+    };
+    const nuclear=document.querySelector("#adminNuclearBtn");
+    if(nuclear)nuclear.onclick=async()=>{
+      if(!confirm("¿Borrar TODOS los datos?"))return;
+      if(!confirm("CONFIRMACIÓN FINAL: MSR, HCE, memorias y nube. ¿Continuar?"))return;
+      makeAdminSnapshot("Antes del borrado total");db=defaultData();save();if(window.MSRCloud?.enabled)window.MSRCloud.clear().catch(console.warn);toast("Datos eliminados");renderAdminModal();
+    };
+  }
+
   async function adminAuth(){
     const pwd=prompt("🔐 Contraseña de administrador");
     if(pwd===null)return false;
@@ -999,8 +1318,8 @@
     return true;
   }
 
-  async function runAdminAction(action){
-    if(!(await adminAuth()))return;
+  async function runAdminAction(action,authenticated=false){
+    if(!authenticated && !(await adminAuth()))return;
 
     if(action==="inspect-id"){
       const raw=prompt("Código / ID MSR que quieres consultar");
@@ -1353,6 +1672,7 @@
       };
     }
 
+    document.querySelectorAll("[data-admin-open]").forEach(btn=>btn.onclick=()=>openAdminCenter(btn.dataset.adminOpen));
     document.querySelectorAll("[data-admin-action]").forEach(btn=>btn.onclick=()=>runAdminAction(btn.dataset.adminAction));
     const backup=$("#backupBtn"); if(backup)backup.onclick=()=>download(`msr-hce-backup-${today()}.json`,JSON.stringify(db,null,2));
     const restore=$("#restoreBtn"),ri=$("#restoreInput"); if(restore)restore.onclick=async()=>{if(await adminAuth())ri.click();};
@@ -1561,6 +1881,7 @@
   $("#installBtn").onclick=async()=>{if(!deferredInstall)return;deferredInstall.prompt();await deferredInstall.userChoice;deferredInstall=null;$("#installBtn").hidden=true};
   window.addEventListener("storage",e=>{if(e.key===STORAGE_KEY){db=load();render()}});
   window.addEventListener("keydown",e=>{
+    if(e.key==="Escape"&&document.querySelector("#adminModal")){closeAdminCenter();return;}
     if(document.body.classList.contains("capture-mode")&&e.key==="Escape")document.body.classList.remove("capture-mode");
   });
   if("serviceWorker" in navigator)window.addEventListener("load",()=>navigator.serviceWorker.register("./sw.js").catch(console.warn));
