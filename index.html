@@ -52,6 +52,19 @@
           <button class="btn ghost" id="recalcBtn">↻ Actualizar</button>
         </div>
       </header>
+      <div id="appUpdateBanner" class="app-update-banner" hidden>
+        <div class="app-update-copy">
+          <span class="app-update-icon">✨</span>
+          <div>
+            <strong>Nueva actualización disponible</strong>
+            <small>Hay una versión más reciente de MSR · HCE Control lista para instalar.</small>
+          </div>
+        </div>
+        <div class="app-update-actions">
+          <button class="btn update-now-btn" id="applyUpdateBtn">⚡ Actualizar ahora</button>
+          <button class="update-later-btn" id="dismissUpdateBtn" aria-label="Más tarde">Más tarde</button>
+        </div>
+      </div>
       <div id="syncBanner" class="sync-banner">
         <div class="sync-left">
           <span id="syncDot" class="sync-dot checking"></span>
