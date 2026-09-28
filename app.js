@@ -130,6 +130,25 @@
     return `<span class="badge ${cls}">${esc(t)}</span>`;
   }
 
+  function stateSelectClass(type,value){
+    const v=String(value||"");
+    if(type==="shipping"){
+      if(v==="Total")return "select-ok";
+      if(v==="Parcial")return "select-warn";
+      return "select-neutral";
+    }
+    if(type==="serval"){
+      return v==="Si"?"select-danger":"select-ok-soft";
+    }
+    if(type==="hce"){
+      if(v==="Descargado")return "select-ok";
+      if(v==="Descargando")return "select-purple";
+      if(v==="Posicionado")return "select-info";
+      return "select-warn-soft";
+    }
+    return "";
+  }
+
   function badge(text){
     const t=String(text||"");
     let cls="b-gray";
@@ -319,10 +338,10 @@
       <td><strong>${esc(o.id)}</strong></td>
       <td class="wrap msr-description">${esc(o.description||"")}</td>
       <td>${esc(o.store||"")}</td>
-      <td><select class="msr-edit msr-select" data-msr-id="${esc(o.id)}" data-msr-field="shipping">${msrOptions(s.shipping||"No",["No","Parcial","Total"])}</select></td>
+      <td><select class="msr-edit msr-select ${stateSelectClass("shipping",s.shipping||"No")}" data-msr-id="${esc(o.id)}" data-msr-field="shipping">${msrOptions(s.shipping||"No",["No","Parcial","Total"])}</select></td>
       <td><input class="msr-edit msr-date" type="date" data-msr-id="${esc(o.id)}" data-msr-field="date" value="${esc(s.date||"")}"></td>
       <td><input class="msr-edit msr-time" type="time" data-msr-id="${esc(o.id)}" data-msr-field="time" value="${esc(s.time||"")}"></td>
-      <td><select class="msr-edit msr-select-short ${s.serval==="Si"?"serval-field":""}" data-msr-id="${esc(o.id)}" data-msr-field="serval">${msrOptions(s.serval||"No",["No","Si"])}</select></td>
+      <td><select class="msr-edit msr-select-short ${stateSelectClass("serval",s.serval||"No")} ${s.serval==="Si"?"serval-field":""}" data-msr-id="${esc(o.id)}" data-msr-field="serval">${msrOptions(s.serval||"No",["No","Si"])}</select></td>
       <td><textarea class="msr-edit msr-comment ${s.serval==="Si"?"serval-field":""}" rows="2" data-msr-id="${esc(o.id)}" data-msr-field="comment" placeholder="Comentario">${esc(s.comment||"")}</textarea></td>
     </tr>`).join("")}</tbody></table>`;
   }
@@ -348,7 +367,15 @@
             <h2>Resumen MSR</h2>
             <p>${rows.length} órdenes visibles de ${db.msr.length}. Los cambios se guardan automáticamente.</p>
           </div>
-          <button class="btn ghost" id="resetSummaryFilters">Limpiar filtros</button>
+          <div class="actions">
+            <button class="btn ghost" id="resetSummaryFilters">Limpiar filtros</button>
+            <button class="btn danger-soft" id="clearMSRBtn">🧹 Limpiar MSR</button>
+          </div>
+        </div>
+        <div class="memory-note">
+          <strong>💾 Memoria de estados activa</strong>
+          <span>Al limpiar MSR se borran solo las órdenes visibles. Los estados de cada Código se conservan y se recuperan si esa ID vuelve a aparecer en una importación futura.</span>
+          <span class="memory-count">${Object.keys(db.states).length} IDs guardadas</span>
         </div>
 
         <div class="simple-filter-grid">
@@ -458,7 +485,10 @@
       <div class="panel" style="margin-top:0">
         <div class="panel-head">
           <div><h2>Contenedores HCE</h2><p>Introduce fecha y hora de llegada. Al completarlas pasa automáticamente a Posicionado.</p></div>
-          <button class="btn ghost" id="resetHCEFilters">Limpiar filtros</button>
+          <div class="actions">
+            <button class="btn ghost" id="resetHCEFilters">Limpiar filtros</button>
+            <button class="btn danger-soft" id="clearHCEBtn">🧹 Limpiar HCE</button>
+          </div>
         </div>
         <div class="simple-filter-grid hce-simple-filters">
           <label>Desde<input id="hceDateFrom" class="filter-input" type="date" value="${esc(hceDateFrom)}"></label>
@@ -482,7 +512,7 @@
         <td>${fmtTime(x.planTime)}</td>
         <td><input class="hce-edit hce-date" type="date" data-hce-key="${esc(x.key)}" data-hce-field="realDate" value="${esc(x.realDate||"")}"></td>
         <td><input class="hce-edit hce-time" type="time" data-hce-key="${esc(x.key)}" data-hce-field="realTime" value="${esc(x.realTime||"")}"></td>
-        <td><select class="hce-edit hce-select" data-hce-key="${esc(x.key)}" data-hce-field="process">${msrOptions(x.process||"Pendiente de recibir",["Pendiente de recibir","Posicionado","Descargando","Descargado"])}</select></td>
+        <td><select class="hce-edit hce-select ${stateSelectClass("hce",x.process||"Pendiente de recibir")}" data-hce-key="${esc(x.key)}" data-hce-field="process">${msrOptions(x.process||"Pendiente de recibir",["Pendiente de recibir","Posicionado","Descargando","Descargado"])}</select></td>
       </tr>`).join("")}</tbody></table>`;
   }
 
@@ -490,24 +520,45 @@
   function renderImport(kind){
     const msr=kind==="msr";
     const when=msr?db.meta.msrImportedAt:db.meta.hceImportedAt;
+    const count=msr?db.msr.length:db.hce.length;
     content.innerHTML=`
-      <div class="panel" style="margin-top:0">
-        <div class="panel-head"><div><h2>Importar ${msr?"MSR":"HCE"}</h2><p>Admite .xlsx, .xls, .csv. La detección de columnas es automática por nombre.</p></div></div>
+      <div class="panel import-panel" style="margin-top:0">
+        <div class="panel-head">
+          <div>
+            <h2>Importar ${msr?"MSR":"HCE"}</h2>
+            <p>Flujo diario: limpia la planificación anterior y carga el archivo nuevo.</p>
+          </div>
+          <button class="btn danger-soft" id="${msr?"clearMSRBtn":"clearHCEBtn"}">🧹 Limpiar ${msr?"MSR":"HCE"}</button>
+        </div>
+
+        <div class="workflow-guide">
+          <div class="workflow-step"><b>1</b><span><strong>Limpiar</strong><small>Quita la planificación anterior</small></span></div>
+          <div class="workflow-arrow">→</div>
+          <div class="workflow-step"><b>2</b><span><strong>Importar</strong><small>Carga el fichero del día</small></span></div>
+          <div class="workflow-arrow">→</div>
+          <div class="workflow-step"><b>3</b><span><strong>Gestionar</strong><small>Actualiza envío / llegada</small></span></div>
+          <div class="workflow-arrow">→</div>
+          <div class="workflow-step"><b>4</b><span><strong>Inicio</strong><small>Consulta o captura el parte</small></span></div>
+        </div>
+
         <div class="import-zone" id="dropZone">
-          <div style="font-size:36px">📄</div>
+          <div class="import-icon">📄</div>
           <h3>Arrastra aquí el archivo</h3>
           <p>o selecciónalo desde tu equipo</p>
           <input type="file" id="fileInput" accept=".xlsx,.xls,.csv">
-          <label class="btn primary" for="fileInput">Seleccionar archivo</label>
+          <label class="btn primary upload-btn" for="fileInput">📥 Seleccionar archivo</label>
         </div>
+
         <div class="notice ${msr?"":"warn"}" style="margin-top:16px">
           ${msr
-            ?"Las órdenes ya existentes conservarán Envío, fecha/hora de expedición, Serval y comentarios."
-            :"Una nueva importación HCE agrupa todas las líneas por MATRÍCULA. El checklist del mismo contenedor se conserva."}
+            ? `<strong>Importante:</strong> los estados se guardan por Código/ID. Si hoy tienes 20 IDs, limpias MSR y mañana importas 30 donde vuelven esas 20, recuperarán automáticamente su Envío, fecha/hora, Serval y comentario.`
+            : `<strong>HCE diario:</strong> al limpiar HCE se eliminan los contenedores actuales. La nueva importación empieza con los contenedores del fichero nuevo.`}
         </div>
-        <div class="preview">
-          <strong>Última importación:</strong> ${when?new Date(when).toLocaleString("es-ES"):"Nunca"} ·
-          <strong>Registros:</strong> ${msr?db.msr.length:db.hce.length}
+
+        <div class="preview import-meta">
+          <span><strong>Última importación:</strong> ${when?new Date(when).toLocaleString("es-ES"):"Nunca"}</span>
+          <span><strong>Registros actuales:</strong> ${count}</span>
+          ${msr?`<span><strong>IDs con memoria:</strong> ${Object.keys(db.states).length}</span>`:""}
         </div>
       </div>`;
   }
@@ -524,7 +575,7 @@
           </div>
         </div>
         <div class="panel" style="margin-top:0">
-          <div class="panel-head"><div><h2>Almacenamiento</h2><p>GitHub Pages es estático: esta versión guarda datos localmente.</p></div></div>
+          <div class="panel-head"><div><h2>Almacenamiento</h2><p>Los datos se sincronizan con la nube y además se mantiene una copia local.</p></div></div>
           <div class="list">
             <div class="list-item"><div><strong>${db.msr.length} órdenes</strong><small>Planificación MSR</small></div></div>
             <div class="list-item"><div><strong>${Object.keys(db.states).length} estados</strong><small>Histórico por ID</small></div></div>
@@ -563,17 +614,57 @@
       summaryFilter="all";summaryDateFilter="all";summaryShippingFilter="all";summaryServalFilter="all";summaryTextFilter="";summarySortKey="planDateTime";summarySortDir="asc";render();
     };
 
+    const clearMSR=$("#clearMSRBtn"); if(clearMSR)clearMSR.onclick=()=>{
+      if(!db.msr.length){toast("No hay órdenes MSR para limpiar",true);return;}
+      const remembered=Object.keys(db.states).length;
+      if(!confirm(`¿Limpiar las ${db.msr.length} órdenes MSR actuales?\n\nLos estados guardados por ID NO se borrarán (${remembered} IDs con memoria).`))return;
+      db.msr=[];
+      db.meta.msrImportedAt=null;
+      summaryDateFilter="all";
+      save();
+      toast("MSR limpio · estados por ID conservados");
+      render();
+    };
+
+    const clearHCE=$("#clearHCEBtn"); if(clearHCE)clearHCE.onclick=()=>{
+      if(!db.hce.length){toast("No hay contenedores HCE para limpiar",true);return;}
+      if(!confirm(`¿Limpiar los ${db.hce.length} contenedores HCE actuales?\n\nEsta acción borra la planificación HCE cargada.`))return;
+      db.hce=[];
+      db.meta.hceImportedAt=null;
+      save();
+      toast("HCE limpio · listo para nueva importación");
+      render();
+    };
+
     document.querySelectorAll("[data-msr-id][data-msr-field]").forEach(el=>{
       el.addEventListener("change",()=>{
         const id=idNorm(el.dataset.msrId),field=el.dataset.msrField;
         const s=stateFor(id);
+        const previous={...s};
         s[field]=el.value;
-        if(s.date&&s.time&&s.shipping==="No")toast("Has indicado fecha/hora de expedición pero Envío sigue en No",true);
-        if(s.shipping!=="No"&&(!s.date||!s.time))toast("Completa fecha y hora de expedición",true);
-        if(s.serval==="Si"&&!String(s.comment||"").trim())toast("Serval = Sí requiere comentario",true);
+
+        if((field==="date"||field==="time") && ((s.date&&!s.time)||(!s.date&&s.time))){
+          toast("⚠️ Expedición incompleta: indica fecha Y hora",true);
+        }
+        if(s.shipping!=="No"&&(!s.date||!s.time)){
+          toast("⚠️ Envío marcado: falta completar fecha y hora de expedición",true);
+        }
+        if(s.shipping==="No"&&(s.date||s.time)){
+          toast("⚠️ Hay fecha/hora de expedición pero Envío está en No",true);
+        }
+        if(s.serval==="Si"&&!String(s.comment||"").trim()){
+          toast("⚠️ Serval = Sí: el comentario es obligatorio",true);
+        }
+        if(field==="comment" && s.serval==="Si" && !String(s.comment||"").trim()){
+          s.comment=previous.comment||"";
+          toast("No puedes dejar vacío el comentario mientras Serval sea Sí",true);
+          render();
+          return;
+        }
+
         s.updatedAt=nowISO();
         save();
-        toast("MSR guardado");
+        toast("✓ MSR guardado");
         render();
       });
     });
@@ -606,19 +697,27 @@
         const key=el.dataset.hceKey,field=el.dataset.hceField;
         const item=db.hce.find(x=>x.key===key);
         if(!item)return;
+        const previous={...item};
         item[field]=el.value;
+
+        if((field==="realDate"||field==="realTime")&&((item.realDate&&!item.realTime)||(!item.realDate&&item.realTime))){
+          toast("⚠️ Llegada incompleta: indica fecha Y hora",true);
+        }
 
         if(item.realDate&&item.realTime&&(item.process==="Pendiente de recibir"||!item.process)){
           item.process="Posicionado";
+          toast("✓ Llegada registrada · estado cambiado a Posicionado");
         }
+
         if(item.process!=="Pendiente de recibir"&&(!item.realDate||!item.realTime)){
-          toast("Introduce fecha y hora de llegada antes de cambiar el estado",true);
           item.process="Pendiente de recibir";
+          item.realDate=previous.realDate||item.realDate;
+          item.realTime=previous.realTime||item.realTime;
+          toast("⚠️ Primero debes registrar fecha y hora de llegada",true);
         }
 
         item.updatedAt=nowISO();
         save();
-        toast("HCE guardado");
         render();
       });
     });
