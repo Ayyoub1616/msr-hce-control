@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0f172a">
+  <meta name="description" content="Control operativo MSR/HCE: reparto, estados, contenedores e importaciones.">
+  <title>MSR · HCE Control</title>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./assets/icon-192.png">
+  <link rel="apple-touch-icon" href="./assets/icon-192.png">
+  <link rel="stylesheet" href="./styles.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script defer src="./app.js"></script>
+</head>
+<body>
+  <div id="app">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <div class="brand-mark">M</div>
+        <div><strong>MSR · HCE</strong><small>Control operativo</small></div>
+      </div>
+
+      <nav class="nav" id="nav">
+        <button data-page="inicio" class="active">🏠 <span>Inicio</span></button>
+        <button data-page="resumen">📊 <span>Resumen MSR</span></button>
+        <button data-page="estados">✏️ <span>Editar estados</span></button>
+        <button data-page="hce">🚛 <span>Contenedores HCE</span></button>
+        <button data-page="import-msr">📥 <span>Importar MSR</span></button>
+        <button data-page="import-hce">📥 <span>Importar HCE</span></button>
+        <button data-page="datos">💾 <span>Datos / copias</span></button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <span class="dot ok"></span>
+        <small>Datos guardados en este navegador</small>
+      </div>
+    </aside>
+
+    <main>
+      <header class="topbar">
+        <button class="icon-btn mobile-only" id="menuBtn" aria-label="Menú">☰</button>
+        <div>
+          <h1 id="pageTitle">Inicio</h1>
+          <p id="pageSubtitle">Centro de mando MSR / HCE</p>
+        </div>
+        <div class="top-actions">
+          <button class="btn ghost" id="installBtn" hidden>📲 Instalar app</button>
+          <button class="btn ghost" id="recalcBtn">↻ Actualizar</button>
+        </div>
+      </header>
+
+      <div id="toast" class="toast" aria-live="polite"></div>
+      <section id="content" class="content"></section>
+    </main>
+  </div>
+
+  <dialog id="stateDialog" class="dialog">
+    <form method="dialog" id="stateForm">
+      <div class="dialog-head">
+        <div><small>Ficha de reparto</small><h2 id="stateDialogTitle">ID</h2></div>
+        <button class="icon-btn" value="cancel" aria-label="Cerrar">✕</button>
+      </div>
+      <div class="form-grid">
+        <label>ID<input id="f-id" type="text" inputmode="numeric" readonly></label>
+        <label>Estado reparto
+          <select id="f-status">
+            <option>Pendiente</option><option>En proceso</option><option>Finalizado</option>
+          </select>
+        </label>
+        <label>Fecha envío<input id="f-date" type="date"></label>
+        <label>Hora envío<input id="f-time" type="time"></label>
+        <label>Envío
+          <select id="f-shipping"><option>No</option><option>Parcial</option><option>Total</option></select>
+        </label>
+        <label>Pallets total<input id="f-total" type="number" min="0" step="1"></label>
+        <label>Pallets enviados<input id="f-sent" type="number" min="0" step="1"></label>
+        <label>Quedan<input id="f-left" type="number" readonly></label>
+        <label>Serval<select id="f-serval"><option>No</option><option>Si</option></select></label>
+        <label class="span-2">Comentario<textarea id="f-comment" rows="3"></textarea></label>
+        <label class="span-2">Nota<textarea id="f-note" rows="2"></textarea></label>
+      </div>
+      <div class="dialog-actions">
+        <button class="btn ghost" value="cancel">Cancelar</button>
+        <button type="button" class="btn primary" id="saveStateBtn">💾 Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="containerDialog" class="dialog">
+    <form method="dialog">
+      <div class="dialog-head">
+        <div><small>Ficha HCE</small><h2 id="containerDialogTitle">Contenedor</h2></div>
+        <button class="icon-btn" value="cancel" aria-label="Cerrar">✕</button>
+      </div>
+      <div class="form-grid">
+        <label>Contenedor / matrícula<input id="c-number" type="text" readonly></label>
+        <label>ID entrada<input id="c-entry" type="text" readonly></label>
+        <label>Fecha prevista<input id="c-plan-date" type="date" readonly></label>
+        <label>Hora prevista<input id="c-plan-time" type="time" readonly></label>
+        <label>Fecha real<input id="c-real-date" type="date"></label>
+        <label>Hora real<input id="c-real-time" type="time"></label>
+        <label>Proceso
+          <select id="c-process">
+            <option>Pendiente de recibir</option><option>Posicionado</option>
+            <option>Descargando</option><option>Descargado</option>
+          </select>
+        </label>
+        <label>Muelle<input id="c-dock" type="text"></label>
+        <label>Matriculado<select id="c-registered"><option>No</option><option>Si</option></select></label>
+        <label>Ubicado<select id="c-located"><option>No</option><option>En proceso</option><option>Si</option></select></label>
+        <label>5%<select id="c-five"><option>No</option><option>En proceso</option><option>Si</option></select></label>
+        <label>Muestra<select id="c-sample"><option>Pendiente de sacar</option><option>No solicitada</option><option>Sacada</option></select></label>
+        <label class="span-2">Comentario<textarea id="c-comment" rows="3"></textarea></label>
+      </div>
+      <div class="dialog-actions">
+        <button class="btn ghost" value="cancel">Cancelar</button>
+        <button type="button" class="btn primary" id="saveContainerBtn">💾 Guardar</button>
+      </div>
+    </form>
+  </dialog>
+</body>
+</html>
