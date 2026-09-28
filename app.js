@@ -36,7 +36,7 @@
   let hceSortDir = "asc";
   let adminNotice = "";
   let cloudStatus = "checking";
-  let lastSyncAt = null;
+  let lastSyncAt = localStorage.getItem("msr_hce_last_sync") || null;
   let lastSyncError = "";
   let syncing = false;
 
@@ -107,6 +107,7 @@
   function markCloudOnline(){
     cloudStatus="online";
     lastSyncAt=nowISO();
+    localStorage.setItem("msr_hce_last_sync",lastSyncAt);
     lastSyncError="";
     renderSyncStatus();
   }
@@ -824,6 +825,32 @@
 
       ${adminNotice?`<div class="admin-result"><strong>ℹ️ Resultado administrador</strong><pre>${esc(adminNotice)}</pre></div>`:""}
 
+      ${db.meta?.lastImportReport?`
+      <div class="panel import-audit-panel">
+        <div class="panel-head">
+          <div>
+            <h2>🧾 Último control de importación</h2>
+            <p>${db.meta.lastImportReport.kind==="msr"?"MSR":"HCE"} · ${new Date(db.meta.lastImportReport.at).toLocaleString("es-ES")}</p>
+          </div>
+          <span class="admin-badge">${(db.meta.lastImportReport.errors?.length||0)+(db.meta.lastImportReport.warnings?.length||0)} incidencias</span>
+        </div>
+        <div class="system-kpis">
+          <div><b>📄 ${db.meta.lastImportReport.totalRows||0}</b><span>Líneas leídas</span></div>
+          <div><b>✅ ${db.meta.lastImportReport.imported||0}</b><span>Registros importados</span></div>
+          <div><b>❌ ${db.meta.lastImportReport.errors?.length||0}</b><span>Errores</span></div>
+          <div><b>⚠️ ${db.meta.lastImportReport.warnings?.length||0}</b><span>Avisos</span></div>
+        </div>
+        ${(db.meta.lastImportReport.errors?.length||db.meta.lastImportReport.warnings?.length)?`
+          <div class="issue-list admin-issue-list">
+            ${[...(db.meta.lastImportReport.errors||[]).map(x=>({level:"error",...x})),...(db.meta.lastImportReport.warnings||[]).map(x=>({level:"warning",...x}))].slice(0,30).map(x=>`
+              <div class="issue-item ${x.level}">
+                <b>${x.level==="error"?"❌":"⚠️"} Línea ${x.line}</b>
+                <span>${esc(x.message)}</span>
+                ${x.value?`<code>${esc(x.value)}</code>`:""}
+              </div>`).join("")}
+          </div>`:"<div class=\"import-clean\">Sin incidencias en la última importación.</div>"}
+      </div>`:""}
+
       <div class="panel admin-panel">
         <div class="panel-head">
           <div><h2>🔐 Centro de administrador</h2><p>Herramientas para localizar, corregir, recuperar o eliminar datos.</p></div>
@@ -948,8 +975,15 @@
       if(shipping!==null && ["No","Parcial","Total"].includes(shipping))s.shipping=shipping;
       const serval=prompt("SERVAL (No / Si)",s.serval||"No");
       if(serval!==null && ["No","Si"].includes(serval))s.serval=serval;
-      const comment=prompt("COMENTARIO",s.comment||"");
+      const comment=prompt(s.serval==="Si"?"COMENTARIO OBLIGATORIO POR SERVAL":"COMENTARIO",s.comment||"");
       if(comment!==null)s.comment=String(comment).trim();
+      if(s.serval==="Si"&&!s.comment){
+        toast("No se ha guardado: Serval = Sí requiere comentario",true);
+        const snap=JSON.parse(localStorage.getItem(ADMIN_UNDO_KEY)||"null");
+        if(snap?.db)db=snap.db;
+        render();
+        return;
+      }
       s.updatedAt=nowISO();
 
       save();
