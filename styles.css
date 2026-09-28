@@ -753,3 +753,10 @@ body.capture-mode .app-update-banner{display:none!important}
 @media print{
   .app-update-banner{display:none!important}
 }
+
+/* Pending sync resilience v30 */
+.sync-left small{transition:color .15s ease}
+.sync-dot.offline + div small{color:#b45309}
+.sync-banner:has(.sync-dot.offline){background:#fffbeb;border-bottom-color:#fde68a}
+.sync-banner:has(.sync-dot.error){background:#fff1f2;border-bottom-color:#fecdd3}
+.sync-banner:has(.sync-dot.online){background:#f0fdf4;border-bottom-color:#bbf7d0}
