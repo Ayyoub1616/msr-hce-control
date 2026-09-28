@@ -277,21 +277,54 @@
     if(s)s.onclick=()=>{close();if(onSecondary)onSecondary();};
   }
 
+  function importIssueFix(issue,kind){
+    const msg=String(issue?.message||"").toLowerCase();
+    const value=String(issue?.value||"").trim();
+    let problem=issue?.message||"Dato no válido";
+    let fix="Corrige el dato en el fichero y vuelve a importarlo.";
+    if(msg.includes("código/id vacío")||msg.includes("codigo/id vacio")){
+      problem="Código/ID vacío"; fix="Rellena la columna Código de esa línea.";
+    }else if(msg.includes("no numérico")||msg.includes("no numerico")){
+      problem="Código/ID no válido"; fix="Deja solo números en la columna Código.";
+    }else if(msg.includes("orden de trabajo vacía")||msg.includes("orden de trabajo vacia")){
+      problem="Orden de trabajo vacía"; fix="Rellena la columna Orden de trabajo.";
+    }else if(msg.includes("tienda vacía")||msg.includes("tienda vacia")){
+      problem="Tienda vacía"; fix="Rellena la columna Tienda.";
+    }else if(msg.includes("fecha/hora prevista")||msg.includes("fecha prevista")){
+      problem="Fecha/hora prevista no detectada";
+      fix=kind==="msr"?"Revisa el formato de Orden de trabajo o corrige fecha/hora manualmente.":"Corrige Fecha prevista y Hora prevista.";
+    }else if(msg.includes("duplicada")||msg.includes("duplicado")){
+      problem="ID duplicada"; fix="Revisa las líneas repetidas. Se conserva la última aparición.";
+    }else if(msg.includes("falta id entrada")||msg.includes("matrícula")||msg.includes("matricula")){
+      problem="Falta matrícula / ID entrada"; fix="Rellena Matrícula o ID ENTRADA para identificar el HCE.";
+    }else if(msg.includes("cantidad no numérica")||msg.includes("cantidad no numerica")){
+      problem="Cantidad no válida"; fix="Usa un número en la columna Cantidad.";
+    }else if(msg.includes("manual")){
+      problem="Registro manual detectado"; fix="No requiere corrección: el sistema lo conservará o combinará automáticamente.";
+    }
+    return {line:issue?.line??"—",problem,fix,value};
+  }
   function importIssuesPopup(kind,errors,warnings){
     const total=(errors?.length||0)+(warnings?.length||0);
     if(!total)return;
-    const details=[
-      errors?.length?`${errors.length} error(es): líneas que no se han podido importar`:"",
-      warnings?.length?`${warnings.length} aviso(s): datos importados pero que conviene revisar`:"",
-      "Puedes ver el detalle por línea en esta misma pantalla y también desde Datos / copias."
-    ].filter(Boolean);
+    const items=[
+      ...(errors||[]).map(x=>({level:"error",...x})),
+      ...(warnings||[]).map(x=>({level:"warning",...x}))
+    ].slice(0,6).map(x=>{
+      const i=importIssueFix(x,kind);
+      return `${x.level==="error"?"❌":"⚠️"} Línea ${i.line}: ${i.problem} → ${i.fix}${i.value?` · Dato: ${i.value}`:""}`;
+    });
+    if(total>6)items.push(`… y ${total-6} incidencia(s) más en el informe detallado.`);
     showEmployeePopup({
       type:errors?.length?"error":"warning",
-      title:`Importación ${kind==="msr"?"MSR":"HCE"} con incidencias`,
-      message:"La carga ha terminado, pero se han detectado datos que requieren revisión.",
-      details,
-      primaryText:"Ver incidencias",
-      secondaryText:"Entendido"
+      title:`${errors?.length?"Importación con errores":"Importación con avisos"} · ${kind==="msr"?"MSR":"HCE"}`,
+      message:errors?.length
+        ?`${errors.length} línea(s) no se han importado correctamente. Corrige lo indicado y vuelve a cargar el fichero.`
+        :`${warnings.length} línea(s) se han importado, pero conviene revisarlas.`,
+      details:items,
+      primaryText:"Ver detalle",
+      secondaryText:"Cerrar",
+      onPrimary:()=>go(kind==="msr"?"import-msr":"import-hce")
     });
   }
 
