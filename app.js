@@ -433,9 +433,12 @@
         const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:"",raw:true});
         const clean=rows.filter(r=>r.some(v=>String(v).trim()!==""));
         if(clean.length<2)throw new Error("Archivo vacío");
-        const headerIndex=Math.min(...clean.map((r,i)=>({i,score:r.filter(v=>String(v).trim()).length})).filter(x=>x.score>=3).map(x=>x.i));
-        const headers=clean[headerIndex].map(v=>String(v).trim());
-        const data=clean.slice(headerIndex+1);
+
+        // Los archivos MSR y HCE llegan con los títulos de columna en la primera fila.
+        // Esa primera fila se usa SOLO como cabecera y nunca se importa como registro.
+        const headers=clean[0].map(v=>String(v).trim());
+        const data=clean.slice(1);
+
         if(kind==="msr")importMSR(headers,data); else importHCE(headers,data);
       }catch(err){console.error(err);toast("No he podido interpretar el archivo. Revisa que sea el export correcto.",true)}
     };
