@@ -34,3 +34,18 @@ main{min-width:0}.topbar{height:82px;background:rgba(255,255,255,.9);backdrop-fi
 .hce-select{min-width:110px}.hce-sample{min-width:145px}
 .hce-comment{width:210px;min-width:210px;resize:vertical}
 .hce-status{min-width:120px}
+
+.msr-filter-grid{display:grid;grid-template-columns:repeat(6,minmax(135px,1fr));gap:10px;margin:14px 0}
+.msr-filter-grid label{font-size:11px;font-weight:800;color:#475569;text-transform:uppercase;letter-spacing:.03em}
+.msr-filter-grid .filter-input{display:block;width:100%;margin-top:5px;min-width:0}
+.msr-filter-grid .wide-filter{grid-column:span 2}
+.quick-filters{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px}
+.msr-table td{padding:7px 6px}
+.msr-edit{border:1px solid #cbd5e1;border-radius:8px;background:#fff;color:var(--ink);padding:7px 8px;min-height:34px}
+.msr-edit:focus{outline:2px solid #bae6fd;border-color:#38bdf8}
+.msr-select{min-width:120px}.msr-select-short{min-width:78px}
+.msr-date{width:142px}.msr-time{width:98px}.msr-num{width:88px}
+.msr-comment{width:220px;min-width:220px;resize:vertical}
+.msr-situation{min-width:120px}
+@media(max-width:1200px){.msr-filter-grid{grid-template-columns:repeat(3,minmax(140px,1fr))}}
+@media(max-width:760px){.msr-filter-grid{grid-template-columns:1fr 1fr}.msr-filter-grid .wide-filter{grid-column:span 2}}
