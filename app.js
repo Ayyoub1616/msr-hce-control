@@ -265,8 +265,8 @@
   }
   function tableHCE(rows){
     if(!rows.length)return `<div class="empty">No hay planificación HCE importada.</div>`;
-    return `<table class="data-table"><thead><tr><th>Estado</th><th>Contenedor</th><th>ID entrada</th><th>Fecha prev.</th><th>Hora</th><th>Fecha real</th><th>Hora real</th><th>Proceso</th><th>Muelle</th><th>Matriculado</th><th>Ubicado</th><th>5%</th><th>Muestra</th><th>Comentario</th></tr></thead>
-      <tbody>${rows.map((c,i)=>`<tr class="clickable" data-container-key="${esc(c.key)}"><td>${badge(containerStatus(c))}</td><td><strong>${esc(c.number)}</strong></td><td>${esc(c.entryId)}</td><td>${fmtDate(c.planDate)}</td><td>${fmtTime(c.planTime)}</td><td>${fmtDate(c.realDate)}</td><td>${fmtTime(c.realTime)}</td><td>${badge(c.process)}</td><td>${esc(c.dock)}</td><td>${badge(c.registered)}</td><td>${badge(c.located)}</td><td>${badge(c.five)}</td><td>${esc(c.sample)}</td><td class="wrap">${esc(c.comment)}</td></tr>`).join("")}</tbody></table>`;
+    return `<table class="data-table"><thead><tr><th>Estado</th><th>Contenedor</th><th>ID entrada</th><th>Fecha prev.</th><th>Hora</th><th>Cantidad plan.</th><th>Transportista</th><th>Fecha real</th><th>Hora real</th><th>Proceso</th><th>Muelle</th><th>Matriculado</th><th>Ubicado</th><th>5%</th><th>Muestra</th><th>Comentario</th></tr></thead>
+      <tbody>${rows.map((c,i)=>`<tr class="clickable" data-container-key="${esc(c.key)}"><td>${badge(containerStatus(c))}</td><td><strong>${esc(c.number)}</strong></td><td>${esc(c.entryId)}</td><td>${fmtDate(c.planDate)}</td><td>${fmtTime(c.planTime)}</td><td>${esc(c.plannedQty||0)}</td><td class="wrap">${esc(c.transporter||"")}</td><td>${fmtDate(c.realDate)}</td><td>${fmtTime(c.realTime)}</td><td>${badge(c.process)}</td><td>${esc(c.dock)}</td><td>${badge(c.registered)}</td><td>${badge(c.located)}</td><td>${badge(c.five)}</td><td>${esc(c.sample)}</td><td class="wrap">${esc(c.comment)}</td></tr>`).join("")}</tbody></table>`;
   }
 
   function renderImport(kind){
@@ -407,7 +407,7 @@
   function openContainer(key){
     const c=db.hce.find(x=>x.key===key);if(!c)return;
     $("#containerDialogTitle").textContent=c.number||c.entryId||"HCE";
-    $("#c-number").value=c.number||"";$("#c-entry").value=c.entryId||"";$("#c-plan-date").value=c.planDate||"";$("#c-plan-time").value=c.planTime||"";
+    $("#c-number").value=c.number||"";$("#c-entry").value=c.entryId||"";$("#c-plan-date").value=c.planDate||"";$("#c-plan-time").value=c.planTime||"";$("#c-plan-qty").value=c.plannedQty??"";$("#c-transporter").value=c.transporter||"";
     $("#c-real-date").value=c.realDate||"";$("#c-real-time").value=c.realTime||"";$("#c-process").value=c.process||"Pendiente de recibir";
     $("#c-dock").value=c.dock||"";$("#c-registered").value=c.registered||"No";$("#c-located").value=c.located||"No";$("#c-five").value=c.five||"No";
     $("#c-sample").value=c.sample||"Pendiente de sacar";$("#c-comment").value=c.comment||"";$("#containerDialog").dataset.key=key;$("#containerDialog").showModal();
@@ -527,26 +527,71 @@
 
   function importHCE(h,rows){
     const idx={
-      number:findHeader(h,["Número contenedor","Numero contenedor","Contenedor","Matrícula","Matricula"]),
-      entry:findHeader(h,["ID entrada","Entrada","ID"]),
-      date:findHeader(h,["Fecha prevista","Fecha cita","Fecha"]),
-      time:findHeader(h,["Hora prevista","Hora cita","Hora"])
+      entry:findHeader(h,["ID ENTRADA","ID entrada","Entrada","ID"]),
+      task:findHeader(h,["ID TAREA","ID tarea"]),
+      planDate:findHeader(h,["FECHA PREVISTA","Fecha prevista","FECHA PLAN","Fecha plan"]),
+      planTime:findHeader(h,["HORA PREVISTA","Hora prevista","HORA PLAN","Hora plan"]),
+      number:findHeader(h,["MATRÍCULA","Matricula","Número contenedor","Numero contenedor","Contenedor"]),
+      transporter:findHeader(h,["TRANSPORTISTA","Transportista"]),
+      reason:findHeader(h,["RAZON","RAZÓN","Razon"]),
+      qty:findHeader(h,["CANTIDAD","Cantidad"])
     };
-    if(idx.number<0 && idx.entry<0)throw new Error("No encuentro contenedor/entrada");
+    if(idx.entry<0 && idx.number<0)throw new Error("No encuentro ID ENTRADA / MATRÍCULA");
+
     const old=new Map(db.hce.map(c=>[c.key,c]));
-    const next=[];
-    rows.forEach((r,n)=>{
-      const number=String(pick(r,idx.number)).trim(),entryId=String(pick(r,idx.entry)).trim();
-      if(!number&&!entryId)return;
-      const key=(number||entryId).toUpperCase();
-      const prev=old.get(key)||{};
-      next.push({key,number,entryId,planDate:parseDate(pick(r,idx.date)),planTime:parseTime(pick(r,idx.time)),
-        realDate:prev.realDate||"",realTime:prev.realTime||"",process:prev.process||"Pendiente de recibir",dock:prev.dock||"",
-        registered:prev.registered||"No",located:prev.located||"No",five:prev.five||"No",sample:prev.sample||"Pendiente de sacar",
-        comment:prev.comment||"",updatedAt:prev.updatedAt||null});
+    const grouped=new Map();
+
+    rows.forEach(r=>{
+      const entryId=String(pick(r,idx.entry)).trim();
+      const number=String(pick(r,idx.number)).trim();
+      if(!entryId && !number)return;
+      const key=(entryId || number).toUpperCase();
+      const qtyRaw=Number(pick(r,idx.qty)) || 0;
+
+      if(!grouped.has(key)){
+        grouped.set(key,{
+          key,number,entryId,
+          taskId:String(pick(r,idx.task)).trim(),
+          planDate:parseDate(pick(r,idx.planDate)),
+          planTime:parseTime(pick(r,idx.planTime)),
+          transporter:String(pick(r,idx.transporter)).trim(),
+          reason:String(pick(r,idx.reason)).trim(),
+          plannedQty:0,lines:0
+        });
+      }
+
+      const g=grouped.get(key);
+      g.plannedQty += qtyRaw;
+      g.lines += 1;
+      if(!g.number && number)g.number=number;
+      if(!g.entryId && entryId)g.entryId=entryId;
+      if(!g.planDate)g.planDate=parseDate(pick(r,idx.planDate));
+      if(!g.planTime)g.planTime=parseTime(pick(r,idx.planTime));
+      if(!g.transporter)g.transporter=String(pick(r,idx.transporter)).trim();
+      if(!g.reason)g.reason=String(pick(r,idx.reason)).trim();
     });
-    db.hce=next.sort((a,b)=>(`${a.planDate}${a.planTime}`).localeCompare(`${b.planDate}${b.planTime}`));
-    db.meta.hceImportedAt=nowISO();save();toast(`${db.hce.length} entradas HCE importadas`);go("hce");
+
+    db.hce=[...grouped.values()].map(g=>{
+      const prev=old.get(g.key)||{};
+      return {
+        ...g,
+        realDate:prev.realDate||"",
+        realTime:prev.realTime||"",
+        process:prev.process||"Pendiente de recibir",
+        dock:prev.dock||"",
+        registered:prev.registered||"No",
+        located:prev.located||"No",
+        five:prev.five||"No",
+        sample:prev.sample||"Pendiente de sacar",
+        comment:prev.comment||"",
+        updatedAt:prev.updatedAt||null
+      };
+    }).sort((a,b)=>(`${a.planDate}${a.planTime}`).localeCompare(`${b.planDate}${b.planTime}`));
+
+    db.meta.hceImportedAt=nowISO();
+    save();
+    toast(`${db.hce.length} entradas HCE importadas y agrupadas`);
+    go("hce");
   }
 
   document.querySelectorAll("#nav button").forEach(b=>b.onclick=()=>go(b.dataset.page));
