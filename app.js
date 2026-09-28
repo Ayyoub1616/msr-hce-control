@@ -584,12 +584,16 @@
     const msr=kind==="msr";
     const when=msr?db.meta.msrImportedAt:db.meta.hceImportedAt;
     const count=msr?db.msr.length:db.hce.length;
+    const report=db.meta?.lastImportReport;
+    const showReport=report&&report.kind===kind;
+    const issueList=showReport?[...(report.errors||[]).map(x=>({level:"error",...x})),...(report.warnings||[]).map(x=>({level:"warning",...x}))]:[];
+
     content.innerHTML=`
       <div class="panel import-panel" style="margin-top:0">
         <div class="panel-head">
           <div>
-            <h2>Importar ${msr?"MSR":"HCE"}</h2>
-            <p>Flujo diario: limpia la planificación anterior y carga el archivo nuevo.</p>
+            <h2>📥 Importar ${msr?"MSR":"HCE"}</h2>
+            <p>El sistema valida el fichero antes de terminar la carga y te avisa de líneas problemáticas.</p>
           </div>
           <button class="btn danger-soft" id="${msr?"clearMSRBtn":"clearHCEBtn"}">🧹 Limpiar ${msr?"MSR":"HCE"}</button>
         </div>
@@ -597,31 +601,60 @@
         <div class="workflow-guide">
           <div class="workflow-step"><b>1</b><span><strong>Limpiar</strong><small>Quita la planificación anterior</small></span></div>
           <div class="workflow-arrow">→</div>
-          <div class="workflow-step"><b>2</b><span><strong>Importar</strong><small>Carga el fichero del día</small></span></div>
+          <div class="workflow-step"><b>2</b><span><strong>Importar</strong><small>Se valida línea por línea</small></span></div>
           <div class="workflow-arrow">→</div>
-          <div class="workflow-step"><b>3</b><span><strong>Gestionar</strong><small>Actualiza envío / llegada</small></span></div>
+          <div class="workflow-step"><b>3</b><span><strong>Corregir</strong><small>Revisa avisos si aparecen</small></span></div>
           <div class="workflow-arrow">→</div>
-          <div class="workflow-step"><b>4</b><span><strong>Inicio</strong><small>Consulta o captura el parte</small></span></div>
+          <div class="workflow-step"><b>4</b><span><strong>Gestionar</strong><small>Continúa con la operativa</small></span></div>
         </div>
 
         <div class="import-zone" id="dropZone">
           <div class="import-icon">📄</div>
           <h3>Arrastra aquí el archivo</h3>
-          <p>o selecciónalo desde tu equipo</p>
+          <p>.xlsx · .xls · .csv</p>
           <input type="file" id="fileInput" accept=".xlsx,.xls,.csv">
           <label class="btn primary upload-btn" for="fileInput">📥 Seleccionar archivo</label>
         </div>
 
         <div class="notice ${msr?"":"warn"}" style="margin-top:16px">
           ${msr
-            ? `<strong>Importante:</strong> los estados se guardan por Código/ID. Si hoy tienes 20 IDs, limpias MSR y mañana importas 30 donde vuelven esas 20, recuperarán automáticamente su Envío, fecha/hora, Serval y comentario.`
-            : `<strong>HCE diario:</strong> al limpiar HCE se eliminan los contenedores actuales. La nueva importación empieza con los contenedores del fichero nuevo.`}
+            ? `💾 <strong>Memoria activa:</strong> si una ID vuelve a aparecer, recupera automáticamente Envío, fecha/hora, Serval y comentario.`
+            : `🚛 <strong>HCE:</strong> las líneas del mismo contenedor/matrícula se agrupan automáticamente.`}
         </div>
 
+        ${showReport?`
+          <div class="import-report ${report.errors?.length?"report-has-errors":"report-ok"}">
+            <div class="import-report-head">
+              <div>
+                <strong>${report.errors?.length?"⚠️ Importación completada con incidencias":"✅ Importación revisada"}</strong>
+                <small>${new Date(report.at).toLocaleString("es-ES")}</small>
+              </div>
+              <div class="import-report-kpis">
+                <span>📄 ${report.totalRows} líneas</span>
+                <span>✅ ${report.imported} importadas</span>
+                <span>❌ ${report.errors?.length||0} errores</span>
+                <span>⚠️ ${report.warnings?.length||0} avisos</span>
+              </div>
+            </div>
+            ${issueList.length?`
+              <div class="issue-list">
+                ${issueList.slice(0,60).map(x=>`<div class="issue-item ${x.level}">
+                  <b>${x.level==="error"?"❌":"⚠️"} Línea ${x.line}</b>
+                  <span>${esc(x.message)}</span>
+                  ${x.value?`<code>${esc(x.value)}</code>`:""}
+                </div>`).join("")}
+                ${issueList.length>60?`<div class="issue-more">… y ${issueList.length-60} incidencias más. Descarga el diagnóstico desde Datos / copias.</div>`:""}
+              </div>`:"<div class=\"import-clean\">No se han detectado errores en las líneas importadas.</div>"}
+            <div class="actions import-report-actions">
+              <button class="btn primary" data-go="${msr?"resumen":"hce"}">Continuar → ${msr?"Resumen MSR":"HCE"}</button>
+              <button class="btn ghost" id="clearImportReport">Ocultar informe</button>
+            </div>
+          </div>`:""}
+
         <div class="preview import-meta">
-          <span><strong>Última importación:</strong> ${when?new Date(when).toLocaleString("es-ES"):"Nunca"}</span>
-          <span><strong>Registros actuales:</strong> ${count}</span>
-          ${msr?`<span><strong>IDs con memoria:</strong> ${Object.keys(db.states).length}</span>`:""}
+          <span><strong>🕒 Última importación:</strong> ${when?new Date(when).toLocaleString("es-ES"):"Nunca"}</span>
+          <span><strong>📦 Registros actuales:</strong> ${count}</span>
+          ${msr?`<span><strong>💾 IDs con memoria:</strong> ${Object.keys(db.states).length}</span>`:""}
         </div>
       </div>`;
   }
@@ -891,6 +924,9 @@
         render();
       });
     });
+    const clearImportReport=$("#clearImportReport");
+    if(clearImportReport)clearImportReport.onclick=()=>{db.meta.lastImportReport=null;save();render();};
+
     const fileInput=$("#fileInput");
     const dropZone=$("#dropZone");
     const importKind=page==="import-msr"?"msr":page==="import-hce"?"hce":null;
@@ -998,50 +1034,51 @@
     };
     if(idx.id<0)throw new Error("No encuentro la columna Código");
 
+    const errors=[],warnings=[];
     const inferPlanFromWork=(work)=>{
       const s=String(work||"").trim();
       const m=s.match(/_(\d{2})(\d{2})_(\d{1,2})(AM|PM)(?:_|$)/i);
       if(!m)return {date:"",time:""};
-      const day=m[1],month=m[2];
-      const year=String(new Date().getFullYear());
-      let hour=Number(m[3]);
-      const ap=m[4].toUpperCase();
-      if(ap==="PM" && hour<12)hour+=12;
-      if(ap==="AM" && hour===12)hour=0;
+      const day=m[1],month=m[2],year=String(new Date().getFullYear());
+      let hour=Number(m[3]);const ap=m[4].toUpperCase();
+      if(ap==="PM"&&hour<12)hour+=12;if(ap==="AM"&&hour===12)hour=0;
       return {date:`${year}-${month}-${day}`,time:`${String(hour).padStart(2,"0")}:00`};
     };
 
     const map=new Map();
-    rows.forEach(r=>{
+    rows.forEach((r,i)=>{
+      const line=i+2;
       const rawId=String(pick(r,idx.id)).trim();
-      if(!rawId)return;
+      if(!rawId){errors.push({line,message:"Código/ID vacío. La línea no se ha importado."});return;}
       const id=idNorm(rawId);
-      if(!/^\d+$/.test(id))return;
+      if(!/^\d+$/.test(id)){errors.push({line,message:"Código/ID no numérico. La línea no se ha importado.",value:rawId});return;}
 
       const work=String(pick(r,idx.work)).trim();
+      const store=String(pick(r,idx.store)).trim();
       const inferred=inferPlanFromWork(work);
+      if(!work)warnings.push({line,message:"Orden de trabajo vacía.",value:id});
+      if(!store)warnings.push({line,message:"Tienda vacía.",value:id});
+      if(!inferred.date||!inferred.time)warnings.push({line,message:"No se pudo obtener fecha/hora prevista desde Orden de trabajo.",value:work||id});
+      if(map.has(id))warnings.push({line,message:"ID duplicada en el fichero; se conserva la última aparición.",value:id});
+
       map.set(id,{
-        id,
-        planDate:inferred.date,
-        planTime:inferred.time,
-        description:work,
+        id,planDate:inferred.date,planTime:inferred.time,description:work,
         loadOT:String(pick(r,idx.loadOT)).trim(),
         sourceStatus:String(pick(r,idx.sourceStatus)).trim(),
-        store:String(pick(r,idx.store)).trim(),
-        chain:String(pick(r,idx.chain)).trim()
+        store,chain:String(pick(r,idx.chain)).trim()
       });
     });
 
-    // Se carga TODO el fichero. No se elimina ninguna orden por fecha.
     db.msr=[...map.values()].sort((a,b)=>
       (`${a.planDate}${a.planTime}${String(a.id).padStart(12,"0")}`)
       .localeCompare(`${b.planDate}${b.planTime}${String(b.id).padStart(12,"0")}`)
     );
     db.msr.forEach(o=>stateFor(o.id));
     db.meta.msrImportedAt=nowISO();
+    db.meta.lastImportReport={kind:"msr",at:nowISO(),totalRows:rows.length,imported:db.msr.length,errors,warnings};
     save();
-    toast(`${db.msr.length} órdenes MSR importadas`);
-    go("resumen");
+    toast(errors.length?`⚠️ MSR: ${db.msr.length} importadas · ${errors.length} errores`:`✅ ${db.msr.length} órdenes MSR importadas`,errors.length>0);
+    go(errors.length||warnings.length?"import-msr":"resumen");
   }
 
   function importHCE(h,rows){
@@ -1055,24 +1092,32 @@
       reason:findHeader(h,["RAZON","RAZÓN","Razon"]),
       qty:findHeader(h,["CANTIDAD","Cantidad"])
     };
-    if(idx.entry<0 && idx.number<0)throw new Error("No encuentro ID ENTRADA / MATRÍCULA");
+    if(idx.entry<0&&idx.number<0)throw new Error("No encuentro ID ENTRADA / MATRÍCULA");
 
+    const errors=[],warnings=[];
     const old=new Map(db.hce.map(c=>[c.key,c]));
     const grouped=new Map();
 
-    rows.forEach(r=>{
+    rows.forEach((r,i)=>{
+      const line=i+2;
       const entryId=String(pick(r,idx.entry)).trim();
       const number=String(pick(r,idx.number)).trim();
-      if(!entryId && !number)return;
-      const key=(number || entryId).toUpperCase();
-      const qtyRaw=Number(pick(r,idx.qty)) || 0;
+      if(!entryId&&!number){errors.push({line,message:"Falta ID ENTRADA y MATRÍCULA. Línea omitida."});return;}
+      const key=(number||entryId).toUpperCase();
+      const planDate=parseDate(pick(r,idx.planDate));
+      const planTime=parseTime(pick(r,idx.planTime));
+      if(!planDate)warnings.push({line,message:"Fecha prevista vacía o no reconocida.",value:number||entryId});
+      if(!planTime)warnings.push({line,message:"Hora prevista vacía o no reconocida.",value:number||entryId});
+
+      const rawQty=pick(r,idx.qty);
+      const qtyRaw=Number(rawQty)||0;
+      if(rawQty!==""&&!Number.isFinite(Number(rawQty)))warnings.push({line,message:"Cantidad no numérica; se toma como 0.",value:String(rawQty)});
 
       if(!grouped.has(key)){
         grouped.set(key,{
           key,number,entryId,entryIds:entryId?[entryId]:[],
           taskId:String(pick(r,idx.task)).trim(),
-          planDate:parseDate(pick(r,idx.planDate)),
-          planTime:parseTime(pick(r,idx.planTime)),
+          planDate,planTime,
           transporter:String(pick(r,idx.transporter)).trim(),
           reason:String(pick(r,idx.reason)).trim(),
           plannedQty:0,lines:0
@@ -1080,33 +1125,24 @@
       }
 
       const g=grouped.get(key);
-      g.plannedQty += qtyRaw;
-      g.lines += 1;
-      if(entryId && !g.entryIds.includes(entryId))g.entryIds.push(entryId);
+      g.plannedQty+=qtyRaw;g.lines+=1;
+      if(entryId&&!g.entryIds.includes(entryId))g.entryIds.push(entryId);
       g.entryId=g.entryIds.join(", ");
-      if(!g.number && number)g.number=number;
-      if(!g.entryId && entryId)g.entryId=entryId;
-      if(!g.planDate)g.planDate=parseDate(pick(r,idx.planDate));
-      if(!g.planTime)g.planTime=parseTime(pick(r,idx.planTime));
-      if(!g.transporter)g.transporter=String(pick(r,idx.transporter)).trim();
-      if(!g.reason)g.reason=String(pick(r,idx.reason)).trim();
+      if(!g.number&&number)g.number=number;
+      if(!g.planDate)g.planDate=planDate;
+      if(!g.planTime)g.planTime=planTime;
     });
 
     db.hce=[...grouped.values()].map(g=>{
       const prev=old.get(g.key)||{};
-      return {
-        ...g,
-        realDate:prev.realDate||"",
-        realTime:prev.realTime||"",
-        process:prev.process||"Pendiente de recibir",
-        updatedAt:prev.updatedAt||null
-      };
+      return {...g,realDate:prev.realDate||"",realTime:prev.realTime||"",process:prev.process||"Pendiente de recibir",updatedAt:prev.updatedAt||null};
     }).sort((a,b)=>(`${a.planDate}${a.planTime}`).localeCompare(`${b.planDate}${b.planTime}`));
 
     db.meta.hceImportedAt=nowISO();
+    db.meta.lastImportReport={kind:"hce",at:nowISO(),totalRows:rows.length,imported:db.hce.length,errors,warnings};
     save();
-    toast(`${db.hce.length} entradas HCE importadas y agrupadas`);
-    go("hce");
+    toast(errors.length?`⚠️ HCE: ${db.hce.length} contenedores · ${errors.length} errores`:`✅ ${db.hce.length} contenedores HCE importados`,errors.length>0);
+    go(errors.length||warnings.length?"import-hce":"hce");
   }
 
   document.querySelectorAll("#nav button").forEach(b=>b.onclick=()=>go(b.dataset.page));
