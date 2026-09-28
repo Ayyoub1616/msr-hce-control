@@ -52,6 +52,16 @@
           <button class="btn ghost" id="recalcBtn">↻ Actualizar</button>
         </div>
       </header>
+      <div id="syncBanner" class="sync-banner">
+        <div class="sync-left">
+          <span id="syncDot" class="sync-dot checking"></span>
+          <div>
+            <strong id="syncTitle">Comprobando conexión…</strong>
+            <small id="syncDetail">Preparando sincronización</small>
+          </div>
+        </div>
+        <button class="btn sync-btn" id="forceSyncBtn">↻ Forzar sincronización</button>
+      </div>
 
       <div id="toast" class="toast" aria-live="polite"></div>
       <section id="content" class="content"></section>
