@@ -729,6 +729,12 @@
       : "Todas las fechas";
     const detectedProblems=detectProblems();
     const criticalProblems=detectedProblems.filter(x=>x.severity==="error").length;
+    const shiftSummary=`MSR: ${msr.length} órdenes · ${msrNo} sin enviar · ${msrPartial} parciales · ${msrTotal} totales · ${msrLate} con retraso. HCE: ${hce.length} previstos · ${hcePending} pendientes de llegada · ${hceDownloading} descargando · ${hceDone} descargados · ${hceLate} llegaron tarde.`;
+    const shiftStatus=criticalProblems>0
+      ?`Turno con ${criticalProblems} incidencia(s) crítica(s) que requieren revisión.`
+      :detectedProblems.length
+      ?`Turno operativo con ${detectedProblems.length} aviso(s) por revisar.`
+      :"Turno sin incidencias críticas detectadas en los datos visibles.";
 
     content.innerHTML=`
       <div class="dashboard-toolbar no-capture">
@@ -745,15 +751,16 @@
           </div>
           <div class="dashboard-actions">
             <button class="btn ${detectedProblems.length?"problem-btn":"success"}" id="problemsBtn">${detectedProblems.length?"⚠️ "+detectedProblems.length+" por revisar":"✅ Sin problemas"}</button>
-            <button class="btn success" id="captureModeBtn">🖼️ Vista captura</button>
-            <button class="btn primary" id="saveDashboardImageBtn">📸 Guardar PNG</button>
-            <button class="btn violet" id="printDashboardBtn">📄 PDF</button>
+            <button class="btn pdf-main-btn" id="printDashboardBtn">📄 Generar PDF del parte</button>
           </div>
         </div>
       </div>
 
-      <button class="capture-exit capture-only" id="exitCaptureBtn">← Volver al panel</button>
       <section class="report-card" id="operationalReport">
+        <div class="pdf-cover-title print-only">
+          <div class="pdf-cover-mark">📦</div>
+          <div><strong>PARTE OPERATIVO MSR · HCE</strong><span>Resumen de expediciones y recepciones</span></div>
+        </div>
         <div class="report-head">
           <div>
             <div class="eyebrow">📦 PARTE OPERATIVO · MSR / HCE</div>
@@ -768,6 +775,15 @@
           <div>${alerts.length?alerts.map(x=>`<span>${esc(x)}</span>`).join(""):"Todo está dentro de los parámetros visibles para este periodo."}</div>
         </div>
 
+        <div class="shift-summary">
+          <div class="shift-summary-icon">${criticalProblems?"🚨":detectedProblems.length?"⚠️":"✅"}</div>
+          <div>
+            <strong>Situación del turno</strong>
+            <p>${esc(shiftSummary)}</p>
+            <small>${esc(shiftStatus)}</small>
+          </div>
+        </div>
+
         <div class="status-legend">
           <span class="legend success">🟢 Total enviado a tiempo</span>
           <span class="legend purple">🟣 Enviado con retraso</span>
@@ -776,7 +792,8 @@
           <span class="legend info">🔵 No enviado, aún en plazo</span>
           <span class="legend serval">🚨 Serval</span>
         </div>
-        <div class="section-title">📋 Órdenes MSR</div>
+        <section class="pdf-section pdf-msr-section">
+        <div class="section-title">📋 MSR · Repartos / Expediciones</div>
         <div class="grid report-kpis visual-kpis">
           ${kpi("📦 Órdenes",msr.length,"Total del periodo")}
           ${kpi("⏳ Sin enviar",msrNo,"Envío = No")}
@@ -802,7 +819,9 @@
           </table>
         </div>
 
-        <div class="section-title hce-title">🚛 Contenedores HCE</div>
+        </section>
+        <section class="pdf-section pdf-hce-section">
+        <div class="section-title hce-title">🚛 HCE · Entradas / Recepciones</div>
         <div class="grid report-kpis hce-kpis visual-kpis">
           ${kpi("🚛 Contenedores",hce.length,"Total del periodo")}
           ${kpi("⏳ Pendientes",hcePending,"Sin llegada")}
@@ -825,6 +844,7 @@
           </table>
         </div>
 
+        </section>
         <div class="report-footer">MSR · HCE Control · Parte generado ${new Date().toLocaleString("es-ES")}</div>
       </section>`;
   }
@@ -2167,26 +2187,13 @@
       dashboardDateFrom=d.toISOString().slice(0,10);dashboardDateTo=end;render();
     };
     const dall=$("#dashboardAll"); if(dall)dall.onclick=()=>{dashboardDateFrom="";dashboardDateTo="";render()};
-    const capture=$("#captureModeBtn"); if(capture)capture.onclick=()=>{
+    const printBtn=$("#printDashboardBtn"); if(printBtn)printBtn.onclick=()=>{
       stampReportNow();
-      document.body.classList.add("capture-mode");
-      window.scrollTo({top:0,behavior:"smooth"});
-    };
-    const exitCapture=$("#exitCaptureBtn"); if(exitCapture)exitCapture.onclick=()=>document.body.classList.remove("capture-mode");
-    const printBtn=$("#printDashboardBtn"); if(printBtn)printBtn.onclick=()=>{stampReportNow();window.print();};
-    const saveImg=$("#saveDashboardImageBtn"); if(saveImg)saveImg.onclick=async()=>{
-      const report=$("#operationalReport");
-      if(!report||!window.html2canvas){toast("No se puede generar la imagen ahora",true);return;}
-      try{
-        stampReportNow();
-        toast("Generando imagen...");
-        const canvas=await window.html2canvas(report,{scale:2,backgroundColor:"#ffffff",useCORS:true});
-        const a=document.createElement("a");
-        a.download=`parte-operativo-${today()}.png`;
-        a.href=canvas.toDataURL("image/png");
-        a.click();
-        toast("📸 Imagen PNG generada");
-      }catch(e){console.warn(e);toast("Error al generar PNG",true);}
+      document.body.classList.add("pdf-print-mode");
+      setTimeout(()=>{
+        window.print();
+        setTimeout(()=>document.body.classList.remove("pdf-print-mode"),400);
+      },80);
     };
 
     const hf=$("#hceDateFrom"); if(hf)hf.onchange=()=>{hceDateFrom=hf.value;render()};
