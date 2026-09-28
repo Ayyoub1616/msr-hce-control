@@ -602,7 +602,7 @@
     content.innerHTML=`
       <div class="grid two-col">
         <div class="panel" style="margin-top:0">
-          <div class="panel-head"><div><h2>Copia de seguridad</h2><p>Descarga un JSON con MSR, estados e HCE.</p></div></div>
+          <div class="panel-head"><div><h2>💾 Copia de seguridad</h2><p>Descarga o restaura una copia completa.</p></div></div>
           <div class="actions">
             <button class="btn primary" id="backupBtn">⬇️ Descargar backup</button>
             <button class="btn ghost" id="restoreBtn">⬆️ Restaurar backup</button>
@@ -610,20 +610,110 @@
           </div>
         </div>
         <div class="panel" style="margin-top:0">
-          <div class="panel-head"><div><h2>Almacenamiento</h2><p>Los datos se sincronizan con la nube y además se mantiene una copia local.</p></div></div>
+          <div class="panel-head"><div><h2>☁️ Almacenamiento</h2><p>Nube + copia local del dispositivo.</p></div></div>
           <div class="list">
-            <div class="list-item"><div><strong>${db.msr.length} órdenes</strong><small>Planificación MSR</small></div></div>
-            <div class="list-item"><div><strong>${Object.keys(db.states).length} estados</strong><small>Histórico por ID</small></div></div>
-            <div class="list-item"><div><strong>${db.hce.length} contenedores</strong><small>Planificación HCE</small></div></div>
+            <div class="list-item"><div><strong>${db.msr.length} órdenes</strong><small>MSR actuales</small></div></div>
+            <div class="list-item"><div><strong>${Object.keys(db.states).length} IDs</strong><small>Memoria histórica</small></div></div>
+            <div class="list-item"><div><strong>${db.hce.length} contenedores</strong><small>HCE actuales</small></div></div>
           </div>
         </div>
       </div>
-      <div class="panel">
-        <div class="panel-head"><div><h2>Zona peligrosa</h2><p>Estas acciones borran información del navegador actual.</p></div></div>
-        <div class="actions">
-          <button class="btn danger" id="resetBtn">Borrar absolutamente todos los datos</button>
+
+      <div class="panel admin-panel">
+        <div class="panel-head">
+          <div><h2>🔐 Administrador</h2><p>Correcciones y sincronización avanzada.</p></div>
+          <span class="admin-badge">Protegido</span>
         </div>
+        <div class="notice warn">Se pedirá contraseña antes de ejecutar cualquier herramienta.</div>
+        <div class="admin-grid">
+          <button class="admin-action" data-admin-action="pull"><span>☁️⬇️</span><strong>Nube → dispositivo</strong><small>Descarga el estado más reciente</small></button>
+          <button class="admin-action" data-admin-action="push"><span>☁️⬆️</span><strong>Dispositivo → nube</strong><small>Fuerza la subida de esta copia</small></button>
+          <button class="admin-action" data-admin-action="repair"><span>🛠️</span><strong>Reparar datos</strong><small>Normaliza IDs y elimina duplicados</small></button>
+          <button class="admin-action" data-admin-action="reset-id"><span>🧹</span><strong>Resetear memoria ID</strong><small>Borra el estado guardado de una ID concreta</small></button>
+          <button class="admin-action" data-admin-action="clear-msr"><span>📦</span><strong>Vaciar MSR</strong><small>Conserva memoria por ID</small></button>
+          <button class="admin-action" data-admin-action="clear-hce"><span>🚛</span><strong>Vaciar HCE</strong><small>Elimina la planificación actual</small></button>
+          <button class="admin-action" data-admin-action="diag"><span>🧪</span><strong>Diagnóstico</strong><small>Descarga JSON técnico</small></button>
+        </div>
+      </div>
+
+      <div class="panel danger-admin">
+        <div class="panel-head"><div><h2>🚨 Borrado total</h2><p>Elimina planificación, memoria histórica y nube.</p></div></div>
+        <button class="btn danger" id="resetBtn">Borrar absolutamente todos los datos</button>
       </div>`;
+  }
+
+  async function adminAuth(){
+    const pwd=prompt("🔐 Contraseña de administrador");
+    if(pwd===null)return false;
+    const data=new TextEncoder().encode(pwd);
+    const digest=await crypto.subtle.digest("SHA-256",data);
+    const hex=[...new Uint8Array(digest)].map(b=>b.toString(16).padStart(2,"0")).join("");
+    if(hex!=="3156dd05d31035e57d0b80a4033cf98567a2d2591e8b668e3ca10e60911de24f"){
+      toast("Contraseña incorrecta",true);
+      return false;
+    }
+    return true;
+  }
+
+  async function runAdminAction(action){
+    if(!(await adminAuth()))return;
+    if(action==="pull"){
+      if(!window.MSRCloud?.enabled){toast("Nube no disponible",true);return;}
+      try{
+        const cloud=await window.MSRCloud.load();
+        if(!cloud?.version){toast("No hay datos válidos en la nube",true);return;}
+        db=cloud;
+        localStorage.setItem(STORAGE_KEY,JSON.stringify(db));
+        render();
+        toast("☁️ Datos descargados desde la nube");
+      }catch(e){console.warn(e);toast("Error al descargar desde la nube",true);}
+      return;
+    }
+    if(action==="push"){
+      if(!window.MSRCloud?.enabled){toast("Nube no disponible",true);return;}
+      if(!confirm("¿Sobrescribir la nube con los datos de ESTE dispositivo?"))return;
+      try{await window.MSRCloud.save(db);toast("☁️ Datos enviados a la nube");}
+      catch(e){console.warn(e);toast("Error al subir a la nube",true);}
+      return;
+    }
+    if(action==="repair"){
+      const mm=new Map();
+      db.msr.forEach(o=>{const id=idNorm(o.id);if(id)mm.set(id,{...o,id});});
+      db.msr=[...mm.values()];
+      const hm=new Map();
+      db.hce.forEach(x=>{const key=String(x.key||x.number||x.entryId||"").trim().toUpperCase();if(key)hm.set(key,{...x,key});});
+      db.hce=[...hm.values()];
+      const states={};
+      Object.entries(db.states||{}).forEach(([id,s])=>{const k=idNorm(id||s?.id);if(k)states[k]={...s,id:k};});
+      db.states=states;
+      save();render();toast("🛠️ Reparación completada");
+      return;
+    }
+    if(action==="reset-id"){
+      const raw=prompt("Código / ID MSR que quieres resetear");
+      if(!raw)return;
+      const id=idNorm(raw);
+      if(!db.states[id]){toast("Esa ID no tiene memoria guardada",true);return;}
+      if(!confirm(`¿Resetear la memoria guardada de la ID ${id}?`))return;
+      delete db.states[id];
+      save();render();toast(`ID ${id} reseteada`);
+      return;
+    }
+    if(action==="clear-msr"){
+      if(!confirm("¿Vaciar planificación MSR? La memoria por ID se conservará."))return;
+      db.msr=[];db.meta.msrImportedAt=null;save();render();toast("MSR vaciado · memoria conservada");
+      return;
+    }
+    if(action==="clear-hce"){
+      if(!confirm("¿Vaciar todos los contenedores HCE actuales?"))return;
+      db.hce=[];db.meta.hceImportedAt=null;save();render();toast("HCE vaciado");
+      return;
+    }
+    if(action==="diag"){
+      const diag={generatedAt:nowISO(),version:db.version,meta:db.meta,counts:{msr:db.msr.length,states:Object.keys(db.states||{}).length,hce:db.hce.length},data:db};
+      download(`msr-hce-diagnostico-${today()}.json`,JSON.stringify(diag,null,2));
+      toast("Diagnóstico descargado");
+    }
   }
 
   function render(){
@@ -769,14 +859,16 @@
         render();
       });
     });
+    document.querySelectorAll("[data-admin-action]").forEach(btn=>btn.onclick=()=>runAdminAction(btn.dataset.adminAction));
     const backup=$("#backupBtn"); if(backup)backup.onclick=()=>download(`msr-hce-backup-${today()}.json`,JSON.stringify(db,null,2));
     const restore=$("#restoreBtn"),ri=$("#restoreInput"); if(restore)restore.onclick=()=>ri.click();
     if(ri)ri.onchange=e=>{
       const f=e.target.files[0];if(!f)return;const rd=new FileReader();rd.onload=()=>{try{const x=JSON.parse(rd.result);if(!x.version)throw 0;db=x;save();toast("Backup restaurado");render()}catch{toast("Backup no válido",true)}};rd.readAsText(f);
     };
-    const reset=$("#resetBtn");if(reset)reset.onclick=()=>{
+    const reset=$("#resetBtn");if(reset)reset.onclick=async()=>{
+      if(!(await adminAuth()))return;
       if(!confirm("¿Borrar TODOS los datos de MSR, estados y HCE?"))return;
-      if(!confirm("Confirmación final. ¿Borrar absolutamente todo?"))return;
+      if(!confirm("Confirmación FINAL: también se eliminará la memoria histórica y la nube. ¿Continuar?"))return;
       db=defaultData();save();if(window.MSRCloud?.enabled)window.MSRCloud.clear().catch(console.warn);toast("Datos eliminados");render();
     };
   }
