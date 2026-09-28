@@ -41,6 +41,8 @@
   let lastSyncAt = localStorage.getItem("msr_hce_last_sync") || null;
   let lastSyncError = "";
   let syncing = false;
+  let cloudSaveChain = Promise.resolve();
+  let pendingCloudSave = localStorage.getItem("msr_hce_pending_sync")==="1";
 
   const $ = s => document.querySelector(s);
   const content = $("#content");
@@ -70,17 +72,44 @@
     window.dispatchEvent(new CustomEvent("msr-data-changed"));
   }
 
+  function queueCloudSave(snapshot){
+    pendingCloudSave=true;
+    localStorage.setItem("msr_hce_pending_sync","1");
+    renderSyncStatus();
+
+    cloudSaveChain=cloudSaveChain
+      .catch(()=>{})
+      .then(async()=>{
+        if(!window.MSRCloud?.enabled||!navigator.onLine)return;
+        syncing=true;renderSyncStatus();
+        await window.MSRCloud.save(snapshot);
+        pendingCloudSave=false;
+        localStorage.removeItem("msr_hce_pending_sync");
+        markCloudOnline();
+      })
+      .catch(err=>{
+        console.warn("Cloud save",err);
+        pendingCloudSave=true;
+        localStorage.setItem("msr_hce_pending_sync","1");
+        markCloudError(err);
+      })
+      .finally(()=>{
+        syncing=false;
+        renderSyncStatus();
+      });
+    return cloudSaveChain;
+  }
+
   function save() {
     db.meta.updatedAt = new Date().toISOString();
     localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
     window.dispatchEvent(new CustomEvent("msr-data-changed"));
+    const snapshot=JSON.parse(JSON.stringify(db));
     if(window.MSRCloud?.enabled && navigator.onLine){
-      syncing=true;renderSyncStatus();
-      window.MSRCloud.save(db)
-        .then(()=>{markCloudOnline();})
-        .catch(err=>{console.warn("Cloud save",err);markCloudError(err);})
-        .finally(()=>{syncing=false;renderSyncStatus();});
+      queueCloudSave(snapshot);
     }else{
+      pendingCloudSave=true;
+      localStorage.setItem("msr_hce_pending_sync","1");
       renderSyncStatus();
     }
   }
@@ -152,14 +181,14 @@
     if(!online){
       dot.classList.add("offline");
       title.textContent="Sin conexión a Internet";
-      detail.textContent=`Última sincronización: ${formatSyncTime(lastSyncAt)}`;
+      detail.textContent=pendingCloudSave?`⚠️ Cambios pendientes · Última sincronización: ${formatSyncTime(lastSyncAt)}`:`Última sincronización: ${formatSyncTime(lastSyncAt)}`;
       if(btn)btn.disabled=false;
       return;
     }
     if(cloudStatus==="online"){
       dot.classList.add("online");
       title.textContent="En línea · sincronización activa";
-      detail.textContent=`Última sincronización: ${formatSyncTime(lastSyncAt)}`;
+      detail.textContent=pendingCloudSave?`⚠️ Hay cambios pendientes de confirmar · Última: ${formatSyncTime(lastSyncAt)}`:`Última sincronización: ${formatSyncTime(lastSyncAt)}`;
     }else if(cloudStatus==="error"){
       dot.classList.add("error");
       title.textContent="Con Internet, pero sin sincronización";
@@ -207,6 +236,8 @@
         await window.MSRCloud.save(db);
         toast("☁️ Datos enviados y sincronizados");
       }
+      pendingCloudSave=false;
+      localStorage.removeItem("msr_hce_pending_sync");
       markCloudOnline();
     }catch(err){
       console.warn("Force sync",err);
@@ -1951,7 +1982,7 @@
   $("#menuBtn").onclick=()=>$("#sidebar").classList.toggle("open");
   $("#recalcBtn").onclick=()=>{db=load();toast("Datos actualizados");render()};
   $("#forceSyncBtn").onclick=()=>forceSync();
-  window.addEventListener("online",()=>{cloudStatus="checking";renderSyncStatus();forceSync();});
+  window.addEventListener("online",()=>{cloudStatus="checking";renderSyncStatus();toast("🌐 Conexión recuperada · sincronizando cambios…");forceSync();});
   window.addEventListener("offline",()=>{renderSyncStatus();toast("📴 Sin Internet · trabajando con copia local",true);});
   renderSyncStatus();
   window.addEventListener("beforeinstallprompt",e=>{e.preventDefault();deferredInstall=e;$("#installBtn").hidden=false});
@@ -1977,10 +2008,14 @@
         db=cloud;
         localStorage.setItem(STORAGE_KEY,JSON.stringify(db));
         render();
+        pendingCloudSave=false;
+        localStorage.removeItem("msr_hce_pending_sync");
         markCloudOnline();
         toast("Datos sincronizados desde la nube");
       }else{
         await window.MSRCloud.save(db);
+        pendingCloudSave=false;
+        localStorage.removeItem("msr_hce_pending_sync");
         markCloudOnline();
       }
 
