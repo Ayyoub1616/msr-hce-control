@@ -15,7 +15,6 @@
   let db = load();
   let page = "inicio";
   let deferredInstall = null;
-  let stateView = { ids: [], showAll: false };
   let summaryFilter = "all";
   let summaryDateFilter = "all";
   let summaryDateFrom = "";
@@ -309,38 +308,7 @@
   }
   function filterBtn(key,label){return `<button class="btn ${summaryFilter===key?"primary":"ghost"}" data-summary-filter="${esc(key)}">${label}</button>`}
 
-  function renderEstados(){
-    let states=Object.values(db.states);
-    if(stateView.ids.length) states=states.filter(s=>stateView.ids.includes(idNorm(s.id)));
-    else if(!stateView.showAll) states=[];
-    states.sort((a,b)=>Number(a.id)-Number(b.id)||String(a.id).localeCompare(String(b.id)));
-    content.innerHTML=`
-      <div class="panel" style="margin-top:0">
-        <div class="panel-head">
-          <div><h2>Buscador de IDs</h2><p>Introduce una o varias IDs separadas por espacio, coma o salto de línea.</p></div>
-          <div class="actions">
-            <button class="btn violet" id="newStateBtn">➕ Nueva ID</button>
-            <button class="btn ${stateView.showAll?"success":"ghost"}" id="toggleAllStates">${stateView.showAll?"🙈 Ocultar todas":"📋 Mostrar todas"}</button>
-            <button class="btn danger" id="clearAllStates">🗑 Borrar todas las IDs</button>
-          </div>
-        </div>
-        <div class="searchbar">
-          <input class="ids-input" id="idsSearch" placeholder="Ej.: 289, 327, 417, 440" value="${esc(stateView.ids.join(", "))}">
-          <button class="btn primary" id="filterStates">🔎 Filtrar</button>
-          <button class="btn ghost" id="clearStateFilter">Limpiar</button>
-        </div>
-      </div>
-      <div class="panel">
-        <div class="panel-head"><div><h2>${stateView.ids.length?"IDs filtradas":stateView.showAll?"Histórico completo":"Modo buscador"}</h2>
-        <p>${states.length?states.length+" registros visibles":"El histórico permanece guardado pero oculto."}</p></div></div>
-        <div class="table-wrap">${tableStates(states)}</div>
-      </div>`;
-  }
-  function tableStates(states){
-    if(!states.length)return `<div class="empty">Escribe IDs y pulsa Filtrar, o usa Mostrar todas.</div>`;
-    return `<table class="data-table"><thead><tr><th>ID</th><th>Estado</th><th>Fecha envío</th><th>Hora</th><th>Envío</th><th>Pallets total</th><th>Enviados</th><th>Quedan</th><th>Serval</th><th>Comentario</th></tr></thead>
-    <tbody>${states.map(s=>`<tr class="clickable" data-edit-id="${esc(s.id)}"><td><strong>${esc(s.id)}</strong></td><td>${badge(s.status)}</td><td>${fmtDate(s.date)}</td><td>${fmtTime(s.time)}</td><td>${badge(s.shipping)}</td><td>${esc(s.total)}</td><td>${esc(s.sent)}</td><td>${esc(palletsLeft(s))}</td><td>${badge(s.serval)}</td><td class="wrap">${esc(s.comment)}</td></tr>`).join("")}</tbody></table>`;
-  }
+
 
   function containerStatus(c){
     if(c.process==="Descargado")return "Descargado";
@@ -511,24 +479,6 @@
       });
     });
 
-    const filter=$("#filterStates"); if(filter)filter.onclick=()=>{
-      const ids=$("#idsSearch").value.split(/[\s,;|]+/).map(idNorm).filter(Boolean);
-      stateView.ids=[...new Set(ids)].sort((a,b)=>Number(a)-Number(b)); stateView.showAll=false;
-      // create missing records automatically, mirroring Excel workflow
-      const missing=stateView.ids.filter(id=>!db.states[id]);
-      if(missing.length && confirm(`${missing.length} ID(s) no existen. ¿Quieres crearlas ahora?`)){
-        missing.forEach(id=>stateFor(id)); save(); toast("IDs nuevas creadas");
-      }
-      render();
-    };
-    const clear=$("#clearStateFilter"); if(clear)clear.onclick=()=>{stateView.ids=[];stateView.showAll=false;render()};
-    const toggle=$("#toggleAllStates"); if(toggle)toggle.onclick=()=>{stateView.ids=[];stateView.showAll=!stateView.showAll;render()};
-    const nw=$("#newStateBtn"); if(nw)nw.onclick=()=>{const id=idNorm(prompt("Nueva ID:")||"");if(!id)return;if(db.states[id])return openState(id);stateFor(id);save();stateView.ids=[id];stateView.showAll=false;openState(id)};
-    const clearAll=$("#clearAllStates"); if(clearAll)clearAll.onclick=()=>{
-      if(!confirm("Se borrarán TODAS las IDs y todos sus estados. ¿Continuar?"))return;
-      if(!confirm("Segunda confirmación: esta acción no se puede deshacer salvo que tengas backup. ¿Borrar?"))return;
-      db.states={};save();stateView={ids:[],showAll:false};toast("Histórico de estados eliminado");render();
-    };
     const ch=$("#clearHCEBtn"); if(ch)ch.onclick=()=>{
       if(!confirm("¿Borrar toda la planificación HCE y el checklist actual?"))return;
       db.hce=[];db.meta.hceImportedAt=null;save();toast("HCE limpio");render();
@@ -551,30 +501,7 @@
     };
   }
 
-  function openState(id){
-    const s=stateFor(id); save();
-    $("#stateDialogTitle").textContent=`ID ${id}`;
-    $("#f-id").value=s.id;$("#f-status").value=s.status||"Pendiente";$("#f-date").value=s.date||"";$("#f-time").value=s.time||"";
-    $("#f-shipping").value=s.shipping||"No";$("#f-total").value=s.total??"";$("#f-sent").value=s.sent??"";$("#f-left").value=palletsLeft(s);
-    $("#f-serval").value=s.serval||"No";$("#f-comment").value=s.comment||"";$("#f-note").value=s.note||"";
-    calcLeft();$("#stateDialog").showModal();
-  }
-  function calcLeft(){const t=Number($("#f-total").value),s=Number($("#f-sent").value);$("#f-left").value=(Number.isFinite(t)&&Number.isFinite(s))?Math.max(0,t-s):""}
-  $("#f-total").oninput=calcLeft;$("#f-sent").oninput=calcLeft;
-  $("#saveStateBtn").onclick=()=>{
-    const id=idNorm($("#f-id").value), total=$("#f-total").value,sent=$("#f-sent").value;
-    if(total!==""&&sent!==""&&Number(sent)>Number(total))return toast("Pallets enviados no puede superar pallets total",true);
-    const shipping=$("#f-shipping").value;
-    if(shipping==="Parcial"&&(total===""||sent===""))return toast("En envío parcial completa pallets total y enviados",true);
-    const serval=$("#f-serval").value, comment=$("#f-comment").value.trim();
-    if(serval==="Si"&&!comment)return toast("Serval = Si requiere comentario",true);
-    db.states[id]={id,status:$("#f-status").value,date:$("#f-date").value,time:$("#f-time").value,shipping,total,sent,
-      serval,comment,note:$("#f-note").value.trim(),updatedAt:nowISO()};
-    save();$("#stateDialog").close();toast("Estado guardado");
-    if(shipping==="Total")setTimeout(()=>alert("ENVÍO TOTAL: recuerda cerrar la orden de carga en SHP."),50);
-    if(shipping==="Parcial")setTimeout(()=>alert(`ENVÍO PARCIAL: quedan ${palletsLeft(db.states[id])} pallets.`),50);
-    render();
-  };
+
 
   function openContainer(key){
     const c=db.hce.find(x=>x.key===key);if(!c)return;
