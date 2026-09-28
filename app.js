@@ -248,6 +248,52 @@
     }
   }
 
+  function showEmployeePopup({type="info",title="Aviso",message="",details=[],primaryText="Entendido",onPrimary=null,secondaryText="",onSecondary=null}={}){
+    document.querySelector("#employeePopup")?.remove();
+    const icon=type==="error"?"❌":type==="warning"?"⚠️":type==="success"?"✅":"ℹ️";
+    const overlay=document.createElement("div");
+    overlay.id="employeePopup";
+    overlay.className="employee-popup-overlay";
+    overlay.innerHTML=`<div class="employee-popup ${type}">
+      <div class="employee-popup-icon">${icon}</div>
+      <div class="employee-popup-copy">
+        <div class="employee-popup-label">${type==="error"?"ERROR":type==="warning"?"REVISAR":type==="success"?"CORRECTO":"INFORMACIÓN"}</div>
+        <h3>${esc(title)}</h3>
+        <p>${esc(message)}</p>
+        ${details?.length?`<div class="employee-popup-details">${details.map(x=>`<div><span>•</span><span>${esc(x)}</span></div>`).join("")}</div>`:""}
+      </div>
+      <div class="employee-popup-actions">
+        ${secondaryText?`<button class="btn ghost" id="employeePopupSecondary">${esc(secondaryText)}</button>`:""}
+        <button class="btn ${type==="error"?"danger":type==="warning"?"warning-popup-btn":"primary"}" id="employeePopupPrimary">${esc(primaryText)}</button>
+      </div>
+    </div>`;
+    document.body.appendChild(overlay);
+
+    const close=()=>overlay.remove();
+    const p=overlay.querySelector("#employeePopupPrimary");
+    if(p)p.onclick=()=>{close();if(onPrimary)onPrimary();};
+    const s=overlay.querySelector("#employeePopupSecondary");
+    if(s)s.onclick=()=>{close();if(onSecondary)onSecondary();};
+  }
+
+  function importIssuesPopup(kind,errors,warnings){
+    const total=(errors?.length||0)+(warnings?.length||0);
+    if(!total)return;
+    const details=[
+      errors?.length?`${errors.length} error(es): líneas que no se han podido importar`:"",
+      warnings?.length?`${warnings.length} aviso(s): datos importados pero que conviene revisar`:"",
+      "Puedes ver el detalle por línea en esta misma pantalla y también desde Datos / copias."
+    ].filter(Boolean);
+    showEmployeePopup({
+      type:errors?.length?"error":"warning",
+      title:`Importación ${kind==="msr"?"MSR":"HCE"} con incidencias`,
+      message:"La carga ha terminado, pero se han detectado datos que requieren revisión.",
+      details,
+      primaryText:"Ver incidencias",
+      secondaryText:"Entendido"
+    });
+  }
+
   function toast(msg, error=false) {
     const el=$("#toast"); el.textContent=msg; el.className="toast show"+(error?" error":"");
     clearTimeout(toast._t); toast._t=setTimeout(()=>el.className="toast",2600);
@@ -1643,31 +1689,64 @@
         const previous={...s};
         s[field]=el.value;
 
+        if(field==="shipping" && s.shipping!=="No" && (!s.date||!s.time)){
+          s.shipping=previous.shipping||"No";
+          showEmployeePopup({
+            type:"warning",
+            title:"Falta fecha y hora de expedición",
+            message:"No puedes marcar una orden como Parcial o Total sin registrar cuándo se ha expedido.",
+            details:["Completa primero Fecha expedición y Hora expedición.","Después vuelve a seleccionar el estado de envío."],
+            primaryText:"Corregir ahora"
+          });
+          render();
+          return;
+        }
+
         if((field==="date"||field==="time") && ((s.date&&!s.time)||(!s.date&&s.time))){
-          toast("⚠️ Expedición incompleta: indica fecha Y hora",true);
+          showEmployeePopup({
+            type:"warning",
+            title:"Expedición incompleta",
+            message:"La fecha y la hora deben informarse juntas.",
+            details:["Completa el dato que falta antes de continuar."],
+            primaryText:"Entendido"
+          });
         }
-        if(s.shipping!=="No"&&(!s.date||!s.time)){
-          toast("⚠️ Envío marcado: falta completar fecha y hora de expedición",true);
-        }
+
         if(s.shipping==="No"&&(s.date||s.time)){
-          toast("⚠️ Hay fecha/hora de expedición pero Envío está en No",true);
+          showEmployeePopup({
+            type:"warning",
+            title:"Revisa el estado de envío",
+            message:"Hay fecha/hora de expedición, pero Envío sigue marcado como No.",
+            details:["Si ya salió mercancía, cambia Envío a Parcial o Total."],
+            primaryText:"Entendido"
+          });
         }
+
         if(field==="serval" && s.serval==="Si" && !String(s.comment||"").trim()){
           const comment=prompt("🚨 Serval = Sí. Es obligatorio indicar el motivo/comentario:");
           if(!comment||!String(comment).trim()){
             s.serval=previous.serval||"No";
-            toast("Serval no se ha activado: falta comentario obligatorio",true);
+            showEmployeePopup({
+              type:"error",
+              title:"Serval no activado",
+              message:"Serval = Sí necesita obligatoriamente un comentario.",
+              details:["Indica el motivo antes de activar Serval."],
+              primaryText:"Entendido"
+            });
             render();
             return;
           }
           s.comment=String(comment).trim();
         }
-        if(s.serval==="Si"&&!String(s.comment||"").trim()){
-          toast("🚨 Serval = Sí requiere comentario obligatorio",true);
-        }
+
         if(field==="comment" && s.serval==="Si" && !String(s.comment||"").trim()){
           s.comment=previous.comment||"";
-          toast("No puedes dejar vacío el comentario mientras Serval sea Sí",true);
+          showEmployeePopup({
+            type:"error",
+            title:"Comentario obligatorio",
+            message:"No puedes dejar vacío el comentario mientras Serval esté marcado como Sí.",
+            primaryText:"Entendido"
+          });
           render();
           return;
         }
@@ -1730,7 +1809,12 @@
         item[field]=el.value;
 
         if((field==="realDate"||field==="realTime")&&((item.realDate&&!item.realTime)||(!item.realDate&&item.realTime))){
-          toast("⚠️ Llegada incompleta: indica fecha Y hora",true);
+          showEmployeePopup({
+            type:"warning",
+            title:"Llegada incompleta",
+            message:"Debes indicar Fecha llegada y Hora llegada.",
+            primaryText:"Entendido"
+          });
         }
 
         if(item.realDate&&item.realTime&&(item.process==="Pendiente de recibir"||!item.process)){
@@ -1739,10 +1823,18 @@
         }
 
         if(item.process!=="Pendiente de recibir"&&(!item.realDate||!item.realTime)){
-          item.process="Pendiente de recibir";
+          item.process=previous.process||"Pendiente de recibir";
           item.realDate=previous.realDate||item.realDate;
           item.realTime=previous.realTime||item.realTime;
-          toast("⚠️ Primero debes registrar fecha y hora de llegada",true);
+          showEmployeePopup({
+            type:"error",
+            title:"No se puede avanzar el estado",
+            message:"Para cambiar el contenedor a Posicionado, Descargando o Descargado necesitas registrar primero la llegada.",
+            details:["Introduce Fecha llegada y Hora llegada.","Después vuelve a cambiar el estado."],
+            primaryText:"Corregir"
+          });
+          render();
+          return;
         }
 
         item.updatedAt=nowISO();
@@ -1821,7 +1913,16 @@
 
   function handleImport(file,kind){
     if(!file)return;
-    if(!window.XLSX){toast("El lector Excel aún no se ha cargado. Prueba de nuevo en unos segundos.",true);return}
+    if(!window.XLSX){
+      showEmployeePopup({
+        type:"error",
+        title:"No se puede abrir el archivo todavía",
+        message:"El lector de Excel no ha terminado de cargar.",
+        details:["Espera unos segundos y vuelve a intentarlo.","Si continúa, pulsa Actualizar o revisa la conexión."],
+        primaryText:"Entendido"
+      });
+      return;
+    }
     const rd=new FileReader();
     rd.onload=e=>{
       try{
@@ -1850,7 +1951,17 @@
         if(kind==="msr")importMSR(headers,data); else importHCE(headers,data);
       }catch(err){
         console.error(err);
-        toast("No he podido interpretar el archivo. Revisa que sea el export correcto.",true)
+        showEmployeePopup({
+          type:"error",
+          title:"No se ha podido importar el archivo",
+          message:err?.message||"No he podido interpretar el archivo.",
+          details:[
+            "Comprueba que has seleccionado el export correcto.",
+            "No se ha modificado la planificación con esta carga fallida.",
+            "Si el problema continúa, avisa al responsable/admin."
+          ],
+          primaryText:"Revisar archivo"
+        });
       }
     };
     rd.readAsArrayBuffer(file);
@@ -1911,7 +2022,9 @@
     db.meta.lastImportReport={kind:"msr",at:nowISO(),totalRows:rows.length,imported:db.msr.length,errors,warnings};
     save();
     toast(errors.length?`⚠️ MSR: ${db.msr.length} importadas · ${errors.length} errores`:`✅ ${db.msr.length} órdenes MSR importadas`,errors.length>0);
-    go(errors.length||warnings.length?"import-msr":"resumen");
+    const msrHasIssues=errors.length||warnings.length;
+    go(msrHasIssues?"import-msr":"resumen");
+    if(msrHasIssues)setTimeout(()=>importIssuesPopup("msr",errors,warnings),120);
   }
 
   function importHCE(h,rows){
@@ -1975,7 +2088,9 @@
     db.meta.lastImportReport={kind:"hce",at:nowISO(),totalRows:rows.length,imported:db.hce.length,errors,warnings};
     save();
     toast(errors.length?`⚠️ HCE: ${db.hce.length} contenedores · ${errors.length} errores`:`✅ ${db.hce.length} contenedores HCE importados`,errors.length>0);
-    go(errors.length||warnings.length?"import-hce":"hce");
+    const hceHasIssues=errors.length||warnings.length;
+    go(hceHasIssues?"import-hce":"hce");
+    if(hceHasIssues)setTimeout(()=>importIssuesPopup("hce",errors,warnings),120);
   }
 
   document.querySelectorAll("#nav button").forEach(b=>b.onclick=()=>go(b.dataset.page));
@@ -1983,7 +2098,17 @@
   $("#recalcBtn").onclick=()=>{db=load();toast("Datos actualizados");render()};
   $("#forceSyncBtn").onclick=()=>forceSync();
   window.addEventListener("online",()=>{cloudStatus="checking";renderSyncStatus();toast("🌐 Conexión recuperada · sincronizando cambios…");forceSync();});
-  window.addEventListener("offline",()=>{renderSyncStatus();toast("📴 Sin Internet · trabajando con copia local",true);});
+  window.addEventListener("offline",()=>{
+    renderSyncStatus();
+    toast("📴 Sin Internet · trabajando con copia local",true);
+    showEmployeePopup({
+      type:"warning",
+      title:"Sin conexión a Internet",
+      message:"Puedes seguir trabajando. Los cambios se guardarán en este dispositivo y se sincronizarán al recuperar la conexión.",
+      details:["No cierres ni borres los datos del navegador mientras haya cambios pendientes."],
+      primaryText:"Seguir trabajando"
+    });
+  });
   renderSyncStatus();
   window.addEventListener("beforeinstallprompt",e=>{e.preventDefault();deferredInstall=e;$("#installBtn").hidden=false});
   $("#installBtn").onclick=async()=>{if(!deferredInstall)return;deferredInstall.prompt();await deferredInstall.userChoice;deferredInstall=null;$("#installBtn").hidden=true};
