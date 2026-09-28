@@ -228,6 +228,61 @@
     return `🔵 FALTAN · ${label}`;
   }
 
+  function msrComplianceCell(o,s){
+    const ship=s?.shipping||"No";
+    const p=plannedFor(o);
+    const a=actualFor(o,s);
+    const plannedText=p?`${fmtDate(o.planDate)} · ${fmtTime(o.planTime)}`:"Sin previsión";
+    const actualText=a?`${fmtDate(s.date)} · ${fmtTime(s.time)}`:"Sin expedición";
+
+    let cls="cmp-neutral",icon="⚪",title="SIN DATOS",delta="Sin cálculo";
+    if(ship==="Total"){
+      if(a&&p){
+        const diff=a-p;
+        if(diff<=0){cls="cmp-success";icon="✅";title="ENVIADO A TIEMPO";delta=`${exactDurationLabel(diff)} antes`;}
+        else{cls="cmp-complete-late";icon="🟣";title="ENVIADO CON RETRASO";delta=`${exactDurationLabel(diff)} tarde`;}
+      }else{
+        cls="cmp-success";icon="✅";title="ENVIADO";delta="Falta fecha/hora real";
+      }
+    }else if(ship==="Parcial"){
+      if(a&&p){
+        const diff=a-p;
+        cls=diff>0?"cmp-partial-late":"cmp-partial";
+        icon="🟠";title="ENVÍO PARCIAL";delta=diff<=0?`${exactDurationLabel(diff)} antes`:`${exactDurationLabel(diff)} tarde`;
+      }else{
+        cls="cmp-partial";icon="🟠";title="ENVÍO PARCIAL";delta="Pendiente de completar";
+      }
+    }else if(p){
+      const diff=new Date()-p;
+      if(diff>0){cls="cmp-danger";icon="🔴";title="NO ENVIADO · RETRASO";delta=`${exactDurationLabel(diff)} fuera de plazo`;}
+      else{cls="cmp-info";icon="🔵";title="NO ENVIADO · EN PLAZO";delta=`Faltan ${exactDurationLabel(diff)}`;}
+    }else{
+      cls="cmp-neutral";icon="⚪";title="NO ENVIADO";delta="Sin previsión";
+    }
+
+    return `<div class="compliance-card ${cls}">
+      <div class="compliance-main"><span class="compliance-icon">${icon}</span><strong>${title}</strong></div>
+      <div class="compliance-delta">${esc(delta)}</div>
+      <div class="compliance-meta">
+        <span>📅 Prev: ${esc(plannedText)}</span>
+        <span>🚚 Real: ${esc(actualText)}</span>
+      </div>
+    </div>`;
+  }
+
+  function msrShippingBadge(value){
+    const v=value||"No";
+    if(v==="Total")return '<span class="status-chip ship-total">✅ Total</span>';
+    if(v==="Parcial")return '<span class="status-chip ship-partial">🟠 Parcial</span>';
+    return '<span class="status-chip ship-no">⏳ No enviado</span>';
+  }
+
+  function servalBadge(value){
+    return value==="Si"
+      ? '<span class="status-chip serval-yes">🚨 Sí</span>'
+      : '<span class="status-chip serval-no">✓ No</span>';
+  }
+
   function msrComplianceBadge(o,s){
     const ship=s?.shipping||"No";
     const p=plannedFor(o);
@@ -265,12 +320,17 @@
   }
 
   function msrRowClass(o,s){
-    if((s.serval||"No")==="Si")return "row-danger row-serval";
-    const t=timing(o,s);
-    if((s.shipping||"No")==="Total")return t.includes("TARDE")?"row-done-late":"row-success";
-    if((s.shipping||"No")==="Parcial")return "row-warning";
-    if(t.includes("RETRASO"))return "row-danger";
-    if(t.includes("FALTAN"))return "row-info";
+    if((s.serval||"No")==="Si")return "row-serval";
+    const ship=s.shipping||"No";
+    const p=plannedFor(o),a=actualFor(o,s);
+
+    if(ship==="Total"){
+      if(a&&p&&a>p)return "row-complete-late";
+      return "row-success";
+    }
+    if(ship==="Parcial")return "row-partial";
+    if(p&&new Date()>p)return "row-danger";
+    if(p)return "row-info";
     return "row-neutral";
   }
 
@@ -419,11 +479,12 @@
         </div>
 
         <div class="status-legend">
-          <span class="legend success">🟢 Finalizado / a tiempo</span>
-          <span class="legend warning">🟠 Parcial / pendiente</span>
-          <span class="legend danger">🔴 Retraso / incidencia</span>
-          <span class="legend info">🔵 En curso / próximo</span>
-          <span class="legend purple">🟣 Descargando</span>
+          <span class="legend success">🟢 Enviado a tiempo</span>
+          <span class="legend purple">🟣 Enviado con retraso</span>
+          <span class="legend warning">🟠 Envío parcial</span>
+          <span class="legend danger">🔴 No enviado y retrasado</span>
+          <span class="legend info">🔵 No enviado, aún en plazo</span>
+          <span class="legend serval">🚨 Serval</span>
         </div>
         <div class="section-title">📋 Órdenes MSR</div>
         <div class="grid report-kpis visual-kpis">
@@ -439,13 +500,13 @@
           <table class="data-table report-data-table">
             <thead><tr><th>⏱ Cumplimiento</th><th>🔢 Código</th><th>📝 Orden de trabajo</th><th>🏬 Tienda</th><th>🚚 Envío</th><th>🕒 Expedición</th><th>⚠️ Serval</th><th>💬 Comentario</th></tr></thead>
             <tbody>${msr.length?msr.map(({o,s})=>`<tr class="${msrRowClass(o,s)} ${s.serval==="Si"?"serval-alert":""}">
-              <td>${msrComplianceBadge(o,s)}</td>
+              <td>${msrComplianceCell(o,s)}</td>
               <td><strong>${esc(o.id)}</strong></td>
               <td class="wrap">${esc(o.description||"")}</td>
               <td>${esc(o.store||"")}</td>
-              <td>${badge(s.shipping||"No")}</td>
+              <td>${msrShippingBadge(s.shipping||"No")}</td>
               <td>${s.date?`${fmtDate(s.date)} · ${fmtTime(s.time)}`:"—"}</td>
-              <td>${badge(s.serval||"No")}</td>
+              <td>${servalBadge(s.serval||"No")}</td>
               <td class="wrap">${esc(s.comment||"")}</td>
             </tr>`).join(""):`<tr><td colspan="8" class="empty">No hay órdenes MSR en este periodo.</td></tr>`}</tbody>
           </table>
@@ -487,7 +548,16 @@
     return label;
   }
 
-  function kpi(label,value,hint){return `<div class="kpi"><small>${label}</small><strong>${esc(value)}</strong><div class="hint">${hint}</div></div>`}
+  function kpi(label,value,hint){
+    const l=String(label);
+    let cls="kpi-neutral";
+    if(l.includes("Totales")||l.includes("A tiempo")||l.includes("Descargados"))cls="kpi-success";
+    else if(l.includes("Retraso")||l.includes("Tarde"))cls="kpi-danger";
+    else if(l.includes("Parciales")||l.includes("Pendientes"))cls="kpi-warning";
+    else if(l.includes("Serval"))cls="kpi-serval";
+    else if(l.includes("Sin enviar")||l.includes("Contenedores")||l.includes("Órdenes"))cls="kpi-info";
+    return `<div class="kpi ${cls}"><small>${label}</small><strong>${esc(value)}</strong><div class="hint">${hint}</div></div>`;
+  }
 
   function orderRows(){
     return db.msr.map(o=>({o,s:stateFor(o.id)}));
