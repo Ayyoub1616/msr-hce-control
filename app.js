@@ -10,7 +10,7 @@
     msr: [],
     states: {},
     hce: [],
-    meta: { updatedAt: null, msrImportedAt: null, hceImportedAt: null, lastImportReport: null }
+    meta: { updatedAt: null, msrImportedAt: null, hceImportedAt: null, lastImportReport: null, importHistory: [], auditLog: [], trash: [] }
   });
 
   let db = load();
@@ -43,6 +43,7 @@
   let syncing = false;
   let cloudSaveChain = Promise.resolve();
   let pendingCloudSave = localStorage.getItem("msr_hce_pending_sync")==="1";
+  let pendingImportPreview = null;
 
   const $ = s => document.querySelector(s);
   const content = $("#content");
@@ -333,6 +334,62 @@
     return -1;
   };
   const pick=(row,idx,def="")=>idx>=0?(row[idx]??def):def;
+
+  function logAudit(entityType,id,action,changes={},source="empleado"){
+    db.meta.auditLog=Array.isArray(db.meta.auditLog)?db.meta.auditLog:[];
+    db.meta.auditLog.unshift({
+      at:nowISO(),
+      entityType,
+      id:String(id||""),
+      action,
+      changes,
+      source
+    });
+    if(db.meta.auditLog.length>1000)db.meta.auditLog.length=1000;
+  }
+
+  function pushTrash(entry){
+    db.meta.trash=Array.isArray(db.meta.trash)?db.meta.trash:[];
+    db.meta.trash.unshift({trashId:`tr_${Date.now()}_${Math.random().toString(36).slice(2,7)}`,deletedAt:nowISO(),...entry});
+    if(db.meta.trash.length>50)db.meta.trash.length=50;
+  }
+
+  function addImportHistory(report){
+    db.meta.importHistory=Array.isArray(db.meta.importHistory)?db.meta.importHistory:[];
+    db.meta.importHistory.unshift({...report});
+    if(db.meta.importHistory.length>30)db.meta.importHistory.length=30;
+  }
+
+  function detectProblems(){
+    const problems=[];
+    db.msr.forEach(o=>{
+      const s=db.states[idNorm(o.id)]||{};
+      if((s.shipping==="Total"||s.shipping==="Parcial")&&(!s.date||!s.time)){
+        problems.push({type:"msr",severity:"error",id:o.id,title:"Envío sin fecha/hora",detail:o.description||o.store||""});
+      }
+      if(s.serval==="Si"&&!String(s.comment||"").trim()){
+        problems.push({type:"msr",severity:"error",id:o.id,title:"Serval sin comentario",detail:o.description||""});
+      }
+      if(!o.planDate||!o.planTime){
+        problems.push({type:"msr",severity:"warning",id:o.id,title:"Sin fecha/hora prevista",detail:o.description||""});
+      }
+    });
+    db.hce.forEach(x=>{
+      if((x.process||"Pendiente de recibir")!=="Pendiente de recibir"&&(!x.realDate||!x.realTime)){
+        problems.push({type:"hce",severity:"error",id:x.number||x.entryId,title:"Estado avanzado sin llegada",detail:x.process||""});
+      }
+      if(!x.planDate||!x.planTime){
+        problems.push({type:"hce",severity:"warning",id:x.number||x.entryId,title:"Sin fecha/hora prevista",detail:""});
+      }
+    });
+    const r=db.meta?.lastImportReport;
+    if(r){
+      (r.errors||[]).forEach(x=>problems.push({type:"import",severity:"error",id:`Línea ${x.line}`,title:x.message,detail:x.value||""}));
+      (r.warnings||[]).forEach(x=>problems.push({type:"import",severity:"warning",id:`Línea ${x.line}`,title:x.message,detail:x.value||""}));
+    }
+    if(pendingCloudSave)problems.push({type:"sync",severity:"warning",id:"Nube",title:"Cambios pendientes de sincronizar",detail:formatSyncTime(lastSyncAt)});
+    return problems;
+  }
 
   function stateFor(id){
     const k=idNorm(id);
