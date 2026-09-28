@@ -25,7 +25,8 @@
   let summaryIdsFilter = [];
   let summarySortKey = "planDateTime";
   let summarySortDir = "asc";
-  let dashboardDate = today();
+  let dashboardDateFrom = today();
+  let dashboardDateTo = today();
   let hceDateFrom = "";
   let hceDateTo = "";
   let hceProcessFilter = "all";
@@ -173,9 +174,15 @@
 
 
   function renderInicio(){
-    const msr=orderRows().filter(({o})=>!dashboardDate||o.planDate===dashboardDate)
+    const inDashboardRange=d=>{
+      if(!d)return false;
+      if(dashboardDateFrom && d<dashboardDateFrom)return false;
+      if(dashboardDateTo && d>dashboardDateTo)return false;
+      return true;
+    };
+    const msr=orderRows().filter(({o})=>inDashboardRange(o.planDate))
       .sort((a,b)=>(`${a.o.planDate}${a.o.planTime}`).localeCompare(`${b.o.planDate}${b.o.planTime}`));
-    const hce=db.hce.filter(x=>!dashboardDate||x.planDate===dashboardDate)
+    const hce=db.hce.filter(x=>inDashboardRange(x.planDate))
       .sort((a,b)=>(`${a.planDate}${a.planTime}`).localeCompare(`${b.planDate}${b.planTime}`));
 
     const msrPending=msr.filter(({s})=>(s.status||"Pendiente")==="Pendiente").length;
@@ -189,17 +196,31 @@
 
     content.innerHTML=`
       <div class="dashboard-toolbar no-capture">
-        <div class="filters">
-          <label>Fecha del informe <input id="dashboardDate" class="filter-input" type="date" value="${esc(dashboardDate)}"></label>
-          <button class="btn ghost" id="dashboardToday">Hoy</button>
-          <button class="btn primary" id="captureModeBtn">📸 Modo captura</button>
-          <button class="btn ghost" id="printDashboardBtn">🖨 Imprimir / PDF</button>
+        <div class="dashboard-filters">
+          <div class="dashboard-date-group">
+            <label>Desde
+              <input id="dashboardDateFrom" class="filter-input modern-control" type="date" value="${esc(dashboardDateFrom)}">
+            </label>
+            <label>Hasta
+              <input id="dashboardDateTo" class="filter-input modern-control" type="date" value="${esc(dashboardDateTo)}">
+            </label>
+          </div>
+          <div class="dashboard-quick">
+            <button class="btn chip blue" id="dashboardToday">Hoy</button>
+            <button class="btn chip violet" id="dashboardYesterday">Ayer</button>
+            <button class="btn chip amber" id="dashboard48h">Últimas 48 h</button>
+            <button class="btn chip slate" id="dashboardAll">Todas</button>
+          </div>
+          <div class="dashboard-actions">
+            <button class="btn success" id="captureModeBtn">📸 Modo captura</button>
+            <button class="btn primary" id="printDashboardBtn">🖨 Imprimir / PDF</button>
+          </div>
         </div>
       </div>
 
       <section class="report-card">
         <div class="report-head">
-          <div><div class="eyebrow">PARTE OPERATIVO · MSR / HCE</div><h2>${dashboardDate?fmtDate(dashboardDate):"Todas las fechas"}</h2></div>
+          <div><div class="eyebrow">PARTE OPERATIVO · MSR / HCE</div><h2>${dashboardDateFrom||dashboardDateTo ? `${dashboardDateFrom?fmtDate(dashboardDateFrom):"Inicio"} → ${dashboardDateTo?fmtDate(dashboardDateTo):"Actualidad"}` : "Todas las fechas"}</h2></div>
           <div class="report-updated">Actualizado ${new Date().toLocaleString("es-ES")}</div>
         </div>
 
@@ -333,14 +354,14 @@
         <div class="simple-filter-grid">
           <label>Fecha
             <select id="summaryDateFilter" class="filter-input">
-              <option value="all">Todas las fechas</option>
+              <option value="all">📅 Todas las fechas</option>
               ${dates.map(d=>`<option value="${esc(d)}" ${summaryDateFilter===d?"selected":""}>${fmtDate(d)}</option>`).join("")}
             </select>
           </label>
 
           <label>Envío
             <select id="summaryShippingFilter" class="filter-input">
-              <option value="all" ${summaryShippingFilter==="all"?"selected":""}>Todos</option>
+              <option value="all" ${summaryShippingFilter==="all"?"selected":""}>🚚 Todos</option>
               <option value="No" ${summaryShippingFilter==="No"?"selected":""}>No</option>
               <option value="Parcial" ${summaryShippingFilter==="Parcial"?"selected":""}>Parcial</option>
               <option value="Total" ${summaryShippingFilter==="Total"?"selected":""}>Total</option>
@@ -349,7 +370,7 @@
 
           <label>Serval
             <select id="summaryServalFilter" class="filter-input">
-              <option value="all" ${summaryServalFilter==="all"?"selected":""}>Todos</option>
+              <option value="all" ${summaryServalFilter==="all"?"selected":""}>⚠️ Todos</option>
               <option value="No" ${summaryServalFilter==="No"?"selected":""}>No</option>
               <option value="Si" ${summaryServalFilter==="Si"?"selected":""}>Sí</option>
             </select>
@@ -557,8 +578,18 @@
       });
     });
 
-    const dd=$("#dashboardDate"); if(dd)dd.onchange=()=>{dashboardDate=dd.value;render()};
-    const dtoday=$("#dashboardToday"); if(dtoday)dtoday.onclick=()=>{dashboardDate=today();render()};
+    const dfrom=$("#dashboardDateFrom"); if(dfrom)dfrom.onchange=()=>{dashboardDateFrom=dfrom.value;if(dashboardDateTo&&dashboardDateFrom>dashboardDateTo)dashboardDateTo=dashboardDateFrom;render()};
+    const dto=$("#dashboardDateTo"); if(dto)dto.onchange=()=>{dashboardDateTo=dto.value;if(dashboardDateFrom&&dashboardDateTo<dashboardDateFrom)dashboardDateFrom=dashboardDateTo;render()};
+    const dtoday=$("#dashboardToday"); if(dtoday)dtoday.onclick=()=>{dashboardDateFrom=today();dashboardDateTo=today();render()};
+    const dy=$("#dashboardYesterday"); if(dy)dy.onclick=()=>{
+      const d=new Date();d.setDate(d.getDate()-1);const y=d.toISOString().slice(0,10);
+      dashboardDateFrom=y;dashboardDateTo=y;render();
+    };
+    const d48=$("#dashboard48h"); if(d48)d48.onclick=()=>{
+      const end=today();const d=new Date();d.setDate(d.getDate()-1);
+      dashboardDateFrom=d.toISOString().slice(0,10);dashboardDateTo=end;render();
+    };
+    const dall=$("#dashboardAll"); if(dall)dall.onclick=()=>{dashboardDateFrom="";dashboardDateTo="";render()};
     const capture=$("#captureModeBtn"); if(capture)capture.onclick=()=>document.body.classList.toggle("capture-mode");
     const printBtn=$("#printDashboardBtn"); if(printBtn)printBtn.onclick=()=>window.print();
 
