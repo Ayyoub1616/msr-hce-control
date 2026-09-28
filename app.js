@@ -608,6 +608,53 @@
   }
 
 
+  function showProblemsModal(){
+    const problems=detectProblems();
+    document.querySelector("#problemsModal")?.remove();
+    const overlay=document.createElement("div");
+    overlay.id="problemsModal";
+    overlay.className="problems-modal-overlay";
+    overlay.innerHTML=`<div class="problems-modal-shell">
+      <div class="problems-modal-head">
+        <div><span>🧭 CONTROL DE CALIDAD</span><h2>Problemas detectados</h2><p>${problems.length} elemento(s) requieren revisión.</p></div>
+        <button id="problemsModalClose">✕</button>
+      </div>
+      <div class="problems-modal-list">
+        ${problems.length?problems.map(p=>`<div class="problem-item ${p.severity}">
+          <span class="problem-icon">${p.severity==="error"?"❌":"⚠️"}</span>
+          <div><strong>${esc(p.title)}</strong><small>${esc(p.type.toUpperCase())} · ${esc(p.id||"")}${p.detail?" · "+esc(p.detail):""}</small></div>
+        </div>`).join(""):`<div class="admin-editor-empty compact"><span>✅</span><strong>No se detectan problemas</strong><small>La información actual es coherente.</small></div>`}
+      </div>
+      <div class="problems-modal-actions"><button class="btn primary" id="problemsModalOk">Entendido</button></div>
+    </div>`;
+    document.body.appendChild(overlay);
+    const close=()=>overlay.remove();
+    overlay.querySelector("#problemsModalClose").onclick=close;
+    overlay.querySelector("#problemsModalOk").onclick=close;
+  }
+
+  function restoreTrashItem(trashId){
+    const list=Array.isArray(db.meta.trash)?db.meta.trash:[];
+    const item=list.find(x=>x.trashId===trashId);
+    if(!item){toast("Elemento de papelera no encontrado",true);return;}
+    if(item.type==="msr-full"){
+      if(item.order&&!db.msr.some(o=>idNorm(o.id)===idNorm(item.order.id)))db.msr.push({...item.order});
+      if(item.state)db.states[idNorm(item.id)]={...item.state};
+      db.msr.sort((a,b)=>(`${a.planDate||""}${a.planTime||""}${a.id}`).localeCompare(`${b.planDate||""}${b.planTime||""}${b.id}`));
+      logAudit("msr",item.id,"Restaurado desde papelera",{},"admin");
+    }else if(item.type==="msr-memory"){
+      if(item.state)db.states[idNorm(item.id)]={...item.state};
+      logAudit("msr",item.id,"Memoria restaurada desde papelera",{},"admin");
+    }else if(item.type==="hce-full"){
+      if(item.item&&!db.hce.some(x=>x.key===item.item.key))db.hce.push({...item.item});
+      logAudit("hce",item.id,"Restaurado desde papelera",{},"admin");
+    }
+    db.meta.trash=list.filter(x=>x.trashId!==trashId);
+    save();
+    toast("♻️ Elemento restaurado");
+    if(document.querySelector("#adminModal"))renderAdminModal();
+  }
+
   function renderInicio(){
     const inDashboardRange=d=>{
       if(!d)return false;
@@ -642,6 +689,8 @@
     const rangeLabel=dashboardDateFrom||dashboardDateTo
       ? `${dashboardDateFrom?fmtDate(dashboardDateFrom):"Inicio"} → ${dashboardDateTo?fmtDate(dashboardDateTo):"Actualidad"}`
       : "Todas las fechas";
+    const detectedProblems=detectProblems();
+    const criticalProblems=detectedProblems.filter(x=>x.severity==="error").length;
 
     content.innerHTML=`
       <div class="dashboard-toolbar no-capture">
@@ -657,6 +706,7 @@
             <button class="btn chip slate" id="dashboardAll">🗂️ Todas</button>
           </div>
           <div class="dashboard-actions">
+            <button class="btn ${detectedProblems.length?"problem-btn":"success"}" id="problemsBtn">${detectedProblems.length?"⚠️ "+detectedProblems.length+" por revisar":"✅ Sin problemas"}</button>
             <button class="btn success" id="captureModeBtn">🖼️ Vista captura</button>
             <button class="btn primary" id="saveDashboardImageBtn">📸 Guardar PNG</button>
             <button class="btn violet" id="printDashboardBtn">📄 PDF</button>
@@ -1390,6 +1440,7 @@
   function adminRepairPanel(){
     const r=db.meta?.lastImportReport;
     const issues=r?[...(r.errors||[]).map(x=>({level:"error",...x})),...(r.warnings||[]).map(x=>({level:"warning",...x}))]:[];
+    const importHistory=(db.meta.importHistory||[]).slice(0,10);
     return `
       <div class="admin-section-summary">
         <div><b>🧪 ${r?issues.length:0}</b><span>Incidencias última importación</span></div>
@@ -1412,6 +1463,14 @@
             <span>${esc(x.message)}</span>
             ${x.value?`<code>${esc(x.value)}</code>`:""}
           </div>`).join("")}</div>`}
+      </div>
+      <div class="admin-modal-subsection">
+        <h3>📚 Historial de importaciones</h3>
+        ${importHistory.length?`<div class="import-history-list">${importHistory.map(x=>`
+          <div class="import-history-item">
+            <div><strong>${x.kind==="msr"?"📦 MSR":"🚛 HCE"} · ${new Date(x.at).toLocaleString("es-ES")}</strong><small>${esc(x.fileName||"Archivo")} · ${x.imported||0} registros</small></div>
+            <div class="import-history-stats"><span>❌ ${x.errors?.length||0}</span><span>⚠️ ${x.warnings?.length||0}</span><span>🆕 ${x.comparison?.newCount||0}</span><span>✏️ ${x.comparison?.changed||0}</span></div>
+          </div>`).join("")}</div>`:"<div class=\"history-empty\">Aún no hay importaciones registradas.</div>"}
       </div>`;
   }
 
@@ -1436,8 +1495,9 @@
   function adminDangerPanel(){
     const active=new Set(db.msr.map(o=>idNorm(o.id)));
     const orphan=Object.keys(db.states||{}).filter(id=>!active.has(id)).length;
+    const trash=(db.meta.trash||[]).slice(0,20);
     return `
-      <div class="admin-danger-banner">🚨 Estas herramientas eliminan datos. Se crea un punto de recuperación antes de los cambios críticos.</div>
+      <div class="admin-danger-banner">🚨 Estas herramientas eliminan datos. Los borrados individuales se guardan en Papelera y las acciones masivas crean un punto de recuperación.</div>
       <div class="admin-danger-search">
         <label>Borrar por ID concreta</label>
         <div class="admin-search-row">
@@ -1451,6 +1511,14 @@
         <button class="admin-tool-card danger" data-admin-run="clear-msr"><span>📦</span><strong>Vaciar MSR</strong><small>Conserva memoria histórica</small></button>
         <button class="admin-tool-card danger" data-admin-run="clear-hce"><span>🚛</span><strong>Vaciar HCE</strong><small>Elimina planificación HCE actual</small></button>
         <button class="admin-tool-card nuclear" id="adminNuclearBtn"><span>☢️</span><strong>Borrado total</strong><small>MSR + HCE + memorias + nube</small></button>
+      </div>
+      <div class="admin-modal-subsection">
+        <h3>🗑️ Papelera · últimos borrados</h3>
+        ${trash.length?`<div class="trash-list">${trash.map(x=>`
+          <div class="trash-item">
+            <div><strong>${x.type==="msr-memory"?"Memoria MSR":"Elemento borrado"} · ${esc(x.id||"")}</strong><small>${new Date(x.deletedAt).toLocaleString("es-ES")}</small></div>
+            <button class="btn ghost restore-trash-btn" data-trash-id="${esc(x.trashId)}">♻️ Restaurar</button>
+          </div>`).join("")}</div>`:"<div class=\"history-empty\">La papelera está vacía.</div>"}
       </div>`;
   }
 
@@ -1486,6 +1554,7 @@
     const k=idNorm(id);
     const o=db.msr.find(x=>idNorm(x.id)===k);
     const s=db.states?.[k]||stateFor(k);
+    const history=(db.meta.auditLog||[]).filter(x=>x.entityType==="msr"&&idNorm(x.id)===k).slice(0,12);
     const target=document.querySelector("#adminEditorResult");
     if(!target)return;
     if(!o){
@@ -1518,6 +1587,10 @@
         <button class="btn ghost" id="adminReloadMsr" data-id="${esc(k)}">↻ Descartar cambios</button>
         <button class="btn danger-soft" id="adminMemoryFromEditor" data-id="${esc(k)}">🧹 Borrar memoria</button>
         <button class="btn danger" id="adminDeleteFromEditor" data-id="${esc(k)}">🗑️ Eliminar ID completa</button>
+      </div>
+      <div class="entity-history">
+        <h4>🕘 Historial de cambios</h4>
+        ${history.length?history.map(x=>`<div class="history-item"><strong>${new Date(x.at).toLocaleString("es-ES")} · ${esc(x.action)}</strong><small>${esc(x.source||"")} ${x.changes? "· "+esc(JSON.stringify(x.changes)):""}</small></div>`).join(""):"<div class=\"history-empty\">Todavía no hay cambios registrados para esta ID.</div>"}
       </div>`;
     bindMsrAdminEditor();
   }
@@ -1525,6 +1598,7 @@
   function renderHceAdminEditor(query){
     const q=String(query||"").trim().toUpperCase();
     const x=db.hce.find(x=>String(x.key||x.number||x.entryId||"").toUpperCase()===q || String(x.number||"").toUpperCase()===q || String(x.entryId||"").toUpperCase()===q);
+    const history=x?(db.meta.auditLog||[]).filter(a=>a.entityType==="hce"&&String(a.id).toUpperCase()===String(x.key||x.number||x.entryId).toUpperCase()).slice(0,12):[];
     const target=document.querySelector("#adminEditorResult");
     if(!target)return;
     if(!x){
@@ -1552,6 +1626,10 @@
       <div class="admin-editor-actions">
         <button class="btn primary" id="adminSaveHce" data-key="${esc(x.key)}">💾 Guardar cambios</button>
         <button class="btn ghost" id="adminReloadHce" data-key="${esc(x.key)}">↻ Descartar cambios</button>
+      </div>
+      <div class="entity-history">
+        <h4>🕘 Historial de cambios</h4>
+        ${history.length?history.map(a=>`<div class="history-item"><strong>${new Date(a.at).toLocaleString("es-ES")} · ${esc(a.action)}</strong><small>${esc(a.source||"")} ${a.changes?"· "+esc(JSON.stringify(a.changes)):""}</small></div>`).join(""):"<div class=\"history-empty\">Todavía no hay cambios registrados para este HCE.</div>"}
       </div>`;
     bindHceAdminEditor();
   }
@@ -1572,6 +1650,7 @@
       if(shipping!=="No"&&(!date||!time)){toast("Completa fecha y hora de expedición",true);return;}
 
       makeAdminSnapshot(`Antes de editar línea MSR ${id}`);
+      const beforeAdmin={order:{...o},state:{...s}};
       o.description=document.querySelector("#aeDescription").value.trim();
       o.store=document.querySelector("#aeStore").value.trim();
       o.loadOT=document.querySelector("#aeLoadOT").value.trim();
@@ -1580,18 +1659,28 @@
       o.sourceStatus=document.querySelector("#aeSourceStatus").value.trim();
       o.chain=document.querySelector("#aeChain").value.trim();
       s.shipping=shipping;s.date=date;s.time=time;s.serval=serval;s.comment=comment;s.updatedAt=nowISO();
+      logAudit("msr",id,"Edición completa admin",{before:beforeAdmin,after:{order:{...o},state:{...s}}},"admin");
       save();toast("✅ Línea MSR corregida y guardada");renderMsrAdminEditor(id);
     };
     const reload=document.querySelector("#adminReloadMsr");if(reload)reload.onclick=()=>renderMsrAdminEditor(reload.dataset.id);
     const mem=document.querySelector("#adminMemoryFromEditor");if(mem)mem.onclick=async()=>{
       const id=idNorm(mem.dataset.id);
       if(!confirm(`¿Borrar solo la memoria de la ID ${id}?`))return;
-      makeAdminSnapshot(`Antes de borrar memoria ID ${id}`);delete db.states[id];save();toast("Memoria borrada");renderMsrAdminEditor(id);
+      makeAdminSnapshot(`Antes de borrar memoria ID ${id}`);
+      pushTrash({type:"msr-memory",id,state:{...db.states[id]}});
+      delete db.states[id];
+      logAudit("msr",id,"Memoria enviada a papelera",{},"admin");
+      save();toast("Memoria borrada");renderMsrAdminEditor(id);
     };
     const del=document.querySelector("#adminDeleteFromEditor");if(del)del.onclick=()=>{
       const id=idNorm(del.dataset.id);
       if(!confirm(`¿Eliminar por completo la ID ${id}?`))return;
-      makeAdminSnapshot(`Antes de eliminar ID ${id}`);db.msr=db.msr.filter(x=>idNorm(x.id)!==id);delete db.states[id];save();toast("ID eliminada");renderAdminModal();
+      makeAdminSnapshot(`Antes de eliminar ID ${id}`);
+      const deletedOrder=db.msr.find(x=>idNorm(x.id)===id);
+      pushTrash({type:"msr-full",id,order:deletedOrder?{...deletedOrder}:null,state:db.states[id]?{...db.states[id]}:null});
+      db.msr=db.msr.filter(x=>idNorm(x.id)!==id);delete db.states[id];
+      logAudit("msr",id,"ID enviada a papelera",{},"admin");
+      save();toast("ID eliminada");renderAdminModal();
     };
   }
 
@@ -1603,11 +1692,13 @@
       const rd=document.querySelector("#ahRealDate").value,rt=document.querySelector("#ahRealTime").value;
       if(process!=="Pendiente de recibir"&&(!rd||!rt)){toast("Para avanzar el estado HCE necesitas fecha y hora de llegada",true);return;}
       makeAdminSnapshot(`Antes de editar HCE ${x.key}`);
+      const beforeHceAdmin={...x};
       x.number=document.querySelector("#ahNumber").value.trim();
       x.entryId=document.querySelector("#ahEntry").value.trim();
       x.planDate=document.querySelector("#ahPlanDate").value;x.planTime=document.querySelector("#ahPlanTime").value;
       x.realDate=rd;x.realTime=rt;x.process=process;x.transporter=document.querySelector("#ahTransporter").value.trim();
       x.reason=document.querySelector("#ahReason").value.trim();x.updatedAt=nowISO();
+      logAudit("hce",x.key,"Edición completa admin",{before:beforeHceAdmin,after:{...x}},"admin");
       save();toast("✅ HCE corregido y guardado");renderHceAdminEditor(x.key);
     };
     const reload=document.querySelector("#adminReloadHce");if(reload)reload.onclick=()=>renderHceAdminEditor(reload.dataset.key);
@@ -1638,15 +1729,25 @@
       const id=idNorm(document.querySelector("#adminDeleteId").value);if(!id)return;
       if(!db.states[id]){toast("No hay memoria para esa ID",true);return;}
       if(!confirm(`¿Borrar memoria de ID ${id}?`))return;
-      makeAdminSnapshot(`Antes de borrar memoria ID ${id}`);delete db.states[id];save();toast("Memoria eliminada");renderAdminModal();
+      makeAdminSnapshot(`Antes de borrar memoria ID ${id}`);
+      pushTrash({type:"msr-memory",id,state:{...db.states[id]}});
+      delete db.states[id];logAudit("msr",id,"Memoria enviada a papelera",{},"admin");
+      save();toast("Memoria eliminada");renderAdminModal();
     };
     const delFull=document.querySelector("#adminDeleteFullBtn");
     if(delFull)delFull.onclick=()=>{
       const id=idNorm(document.querySelector("#adminDeleteId").value);if(!id)return;
       if(!db.states[id]&&!db.msr.some(x=>idNorm(x.id)===id)){toast("No existe esa ID",true);return;}
       if(!confirm(`¿Eliminar por completo la ID ${id}?`))return;
-      makeAdminSnapshot(`Antes de eliminar ID ${id}`);db.msr=db.msr.filter(x=>idNorm(x.id)!==id);delete db.states[id];save();toast("ID eliminada");renderAdminModal();
+      makeAdminSnapshot(`Antes de eliminar ID ${id}`);
+      const deletedOrder=db.msr.find(x=>idNorm(x.id)===id);
+      pushTrash({type:"msr-full",id,order:deletedOrder?{...deletedOrder}:null,state:db.states[id]?{...db.states[id]}:null});
+      db.msr=db.msr.filter(x=>idNorm(x.id)!==id);delete db.states[id];
+      logAudit("msr",id,"ID enviada a papelera",{},"admin");
+      save();toast("ID eliminada");renderAdminModal();
     };
+    document.querySelectorAll(".restore-trash-btn").forEach(btn=>btn.onclick=()=>restoreTrashItem(btn.dataset.trashId));
+
     const nuclear=document.querySelector("#adminNuclearBtn");
     if(nuclear)nuclear.onclick=async()=>{
       if(!confirm("¿Borrar TODOS los datos?"))return;
@@ -1855,6 +1956,8 @@
   }
 
   function bindPage(){
+    const problemsBtn=$("#problemsBtn"); if(problemsBtn)problemsBtn.onclick=()=>showProblemsModal();
+
     const addManualMSR=$("#addManualMSRBtn"); if(addManualMSR)addManualMSR.onclick=()=>openManualMsrModal();
     const addManualHCE=$("#addManualHCEBtn"); if(addManualHCE)addManualHCE.onclick=()=>openManualHceModal();
 
@@ -1962,6 +2065,7 @@
         }
 
         s.updatedAt=nowISO();
+        logAudit("msr",id,`Cambio ${field}`,{from:previous[field]??"",to:s[field]??""},"empleado");
         save();
         toast("✓ MSR guardado");
         render();
@@ -2048,6 +2152,7 @@
         }
 
         item.updatedAt=nowISO();
+        logAudit("hce",key,`Cambio ${field}`,{from:previous[field]??"",to:item[field]??""},"empleado");
         save();
         render();
       });
