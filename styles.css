@@ -760,3 +760,41 @@ body.capture-mode .app-update-banner{display:none!important}
 .sync-banner:has(.sync-dot.offline){background:#fffbeb;border-bottom-color:#fde68a}
 .sync-banner:has(.sync-dot.error){background:#fff1f2;border-bottom-color:#fecdd3}
 .sync-banner:has(.sync-dot.online){background:#f0fdf4;border-bottom-color:#bbf7d0}
+
+/* Employee guidance popups v31 */
+.employee-popup-overlay{
+  position:fixed;inset:0;z-index:1300;background:rgba(15,23,42,.48);backdrop-filter:blur(3px);
+  display:grid;place-items:center;padding:18px
+}
+.employee-popup{
+  width:min(540px,100%);background:#fff;border-radius:20px;padding:20px;
+  box-shadow:0 28px 80px rgba(15,23,42,.28);border:1px solid #e2e8f0;
+  display:grid;grid-template-columns:50px minmax(0,1fr);gap:14px
+}
+.employee-popup.error{border-top:5px solid #ef4444}
+.employee-popup.warning{border-top:5px solid #f59e0b}
+.employee-popup.success{border-top:5px solid #22c55e}
+.employee-popup.info{border-top:5px solid #3b82f6}
+.employee-popup-icon{
+  width:46px;height:46px;border-radius:14px;display:grid;place-items:center;font-size:24px;background:#f8fafc
+}
+.employee-popup.error .employee-popup-icon{background:#fff1f2}
+.employee-popup.warning .employee-popup-icon{background:#fff7ed}
+.employee-popup.success .employee-popup-icon{background:#ecfdf5}
+.employee-popup.info .employee-popup-icon{background:#eff6ff}
+.employee-popup-label{font-size:9px;font-weight:900;letter-spacing:.12em;color:#94a3b8}
+.employee-popup-copy h3{font-size:19px;margin:4px 0 7px;letter-spacing:-.02em}
+.employee-popup-copy p{margin:0;color:#475569;font-size:12px;line-height:1.5}
+.employee-popup-details{display:grid;gap:6px;margin-top:12px;padding:10px 11px;border-radius:12px;background:#f8fafc}
+.employee-popup-details>div{display:grid;grid-template-columns:12px minmax(0,1fr);gap:5px;font-size:11px;color:#475569;line-height:1.4}
+.employee-popup-actions{
+  grid-column:1/-1;display:flex;justify-content:flex-end;gap:8px;padding-top:13px;border-top:1px solid #e2e8f0
+}
+.warning-popup-btn{background:#f59e0b!important;color:#fff!important;border:1px solid #d97706!important}
+body.capture-mode .employee-popup-overlay{display:none!important}
+@media(max-width:560px){
+  .employee-popup{grid-template-columns:42px minmax(0,1fr);padding:16px}
+  .employee-popup-icon{width:40px;height:40px;font-size:21px}
+  .employee-popup-actions{flex-direction:column-reverse}
+  .employee-popup-actions .btn{width:100%}
+}
