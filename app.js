@@ -35,6 +35,10 @@
   let hceSortKey = "planDateTime";
   let hceSortDir = "asc";
   let adminNotice = "";
+  let cloudStatus = "checking";
+  let lastSyncAt = null;
+  let lastSyncError = "";
+  let syncing = false;
 
   const $ = s => document.querySelector(s);
   const content = $("#content");
@@ -49,8 +53,101 @@
     db.meta.updatedAt = new Date().toISOString();
     localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
     window.dispatchEvent(new CustomEvent("msr-data-changed"));
-    if(window.MSRCloud?.enabled) window.MSRCloud.save(db).catch(err=>console.warn("Cloud save",err));
+    if(window.MSRCloud?.enabled && navigator.onLine){
+      syncing=true;renderSyncStatus();
+      window.MSRCloud.save(db)
+        .then(()=>{markCloudOnline();})
+        .catch(err=>{console.warn("Cloud save",err);markCloudError(err);})
+        .finally(()=>{syncing=false;renderSyncStatus();});
+    }else{
+      renderSyncStatus();
+    }
   }
+  function formatSyncTime(v){
+    if(!v)return "Nunca";
+    try{return new Date(v).toLocaleString("es-ES")}catch{return String(v)}
+  }
+
+  function renderSyncStatus(){
+    const banner=$("#syncBanner"),dot=$("#syncDot"),title=$("#syncTitle"),detail=$("#syncDetail"),btn=$("#forceSyncBtn");
+    if(!banner||!dot||!title||!detail)return;
+
+    const online=navigator.onLine;
+    dot.className="sync-dot";
+    if(syncing){
+      dot.classList.add("syncing");
+      title.textContent="Sincronizando…";
+      detail.textContent="Enviando/recibiendo cambios";
+      if(btn)btn.disabled=true;
+      return;
+    }
+    if(!online){
+      dot.classList.add("offline");
+      title.textContent="Sin conexión a Internet";
+      detail.textContent=`Última sincronización: ${formatSyncTime(lastSyncAt)}`;
+      if(btn)btn.disabled=false;
+      return;
+    }
+    if(cloudStatus==="online"){
+      dot.classList.add("online");
+      title.textContent="En línea · sincronización activa";
+      detail.textContent=`Última sincronización: ${formatSyncTime(lastSyncAt)}`;
+    }else if(cloudStatus==="error"){
+      dot.classList.add("error");
+      title.textContent="Con Internet, pero sin sincronización";
+      detail.textContent=lastSyncError?`${lastSyncError} · Última: ${formatSyncTime(lastSyncAt)}`:`Última sincronización: ${formatSyncTime(lastSyncAt)}`;
+    }else{
+      dot.classList.add("checking");
+      title.textContent="Comprobando conexión…";
+      detail.textContent=`Última sincronización: ${formatSyncTime(lastSyncAt)}`;
+    }
+    if(btn)btn.disabled=false;
+  }
+
+  function markCloudOnline(){
+    cloudStatus="online";
+    lastSyncAt=nowISO();
+    lastSyncError="";
+    renderSyncStatus();
+  }
+
+  function markCloudError(err){
+    cloudStatus="error";
+    lastSyncError=err?.message||"Error de sincronización";
+    renderSyncStatus();
+  }
+
+  async function forceSync(){
+    if(!window.MSRCloud?.enabled){
+      cloudStatus="error";lastSyncError="Nube no configurada";renderSyncStatus();return;
+    }
+    if(!navigator.onLine){
+      renderSyncStatus();toast("Sin Internet: no se puede sincronizar ahora",true);return;
+    }
+    syncing=true;renderSyncStatus();
+    try{
+      const cloud=await window.MSRCloud.load();
+      const localTs=Date.parse(db?.meta?.updatedAt||0)||0;
+      const cloudTs=Date.parse(cloud?.meta?.updatedAt||0)||0;
+      if(cloud?.version && cloudTs>localTs){
+        db=cloud;
+        localStorage.setItem(STORAGE_KEY,JSON.stringify(db));
+        render();
+        toast("☁️ Se descargó la versión más reciente");
+      }else{
+        await window.MSRCloud.save(db);
+        toast("☁️ Datos enviados y sincronizados");
+      }
+      markCloudOnline();
+    }catch(err){
+      console.warn("Force sync",err);
+      markCloudError(err);
+      toast("No se pudo sincronizar",true);
+    }finally{
+      syncing=false;renderSyncStatus();
+    }
+  }
+
   function toast(msg, error=false) {
     const el=$("#toast"); el.textContent=msg; el.className="toast show"+(error?" error":"");
     clearTimeout(toast._t); toast._t=setTimeout(()=>el.className="toast",2600);
@@ -128,6 +225,33 @@
     }
     if(diff>0)return `🔴 RETRASO · ${label}`;
     return `🔵 FALTAN · ${label}`;
+  }
+
+  function msrComplianceBadge(o,s){
+    const ship=s?.shipping||"No";
+    const p=plannedFor(o);
+    const a=actualFor(o,s);
+    if(!p){
+      const label=ship==="Total"?"✅ ENVIADO":ship==="Parcial"?"🟠 PARCIAL":"⏳ NO ENVIADO";
+      return `<span class="badge b-gray">${label} · SIN PREVISIÓN</span>`;
+    }
+
+    if(ship==="Total"||ship==="Parcial"){
+      if(!a){
+        const cls=ship==="Total"?"b-green":"b-orange";
+        const label=ship==="Total"?"✅ ENVIADO":"🟠 PARCIAL";
+        return `<span class="badge ${cls}">${label} · SIN HORA REAL</span>`;
+      }
+      const diff=a-p;
+      const txt=exactDurationLabel(diff);
+      const label=ship==="Total"?"✅ ENVIADO":"🟠 PARCIAL";
+      const cls=diff<=0?(ship==="Total"?"b-green":"b-orange"):"b-red";
+      return `<span class="badge ${cls}">${label} · ${diff<=0?txt+" antes":txt+" tarde"}</span>`;
+    }
+
+    const diff=new Date()-p;
+    if(diff>0)return `<span class="badge b-red">🔴 NO ENVIADO · ${exactDurationLabel(diff)} de retraso</span>`;
+    return `<span class="badge b-blue">🔵 NO ENVIADO · faltan ${exactDurationLabel(diff)}</span>`;
   }
 
   function msrTimeBadge(o,s){
@@ -314,7 +438,7 @@
           <table class="data-table report-data-table">
             <thead><tr><th>⏱ Cumplimiento</th><th>🔢 Código</th><th>📝 Orden de trabajo</th><th>🏬 Tienda</th><th>🚚 Envío</th><th>🕒 Expedición</th><th>⚠️ Serval</th><th>💬 Comentario</th></tr></thead>
             <tbody>${msr.length?msr.map(({o,s})=>`<tr class="${msrRowClass(o,s)} ${s.serval==="Si"?"serval-alert":""}">
-              <td>${msrTimeBadge(o,s)}</td>
+              <td>${msrComplianceBadge(o,s)}</td>
               <td><strong>${esc(o.id)}</strong></td>
               <td class="wrap">${esc(o.description||"")}</td>
               <td>${esc(o.store||"")}</td>
@@ -714,6 +838,7 @@
 
         <div class="admin-grid">
           <button class="admin-action safe" data-admin-action="inspect-id"><span>🔎</span><strong>Buscar una ID</strong><small>Ver si está activa y qué memoria tiene guardada</small></button>
+          <button class="admin-action warning" data-admin-action="edit-msr-id"><span>✏️</span><strong>Editar línea MSR por ID</strong><small>Corregir Orden de trabajo, Tienda, fecha/hora y datos operativos</small></button>
           <button class="admin-action safe" data-admin-action="export-memory"><span>📤</span><strong>Exportar memoria</strong><small>Descarga todos los estados históricos</small></button>
           <button class="admin-action safe" data-admin-action="diag"><span>🧪</span><strong>Diagnóstico completo</strong><small>Datos + último informe de importación</small></button>
 
@@ -788,6 +913,50 @@
         ? `ID: ${info.id}\nActiva ahora: ${info.active?"Sí":"No"}\nOrden: ${info.order||"—"}\nTienda: ${info.store||"—"}\nEnvío: ${info.shipping}\nExpedición: ${info.date||"—"} ${info.time||""}\nServal: ${info.serval}\nComentario: ${info.comment||"—"}\nÚltimo cambio: ${info.updatedAt?new Date(info.updatedAt).toLocaleString("es-ES"):"—"}`
         : `No existe información guardada para la ID ${idNorm(raw)}.`;
       render();return;
+    }
+
+    if(action==="edit-msr-id"){
+      const raw=prompt("Código / ID MSR que quieres editar");
+      if(!raw)return;
+      const id=idNorm(raw);
+      const o=db.msr.find(x=>idNorm(x.id)===id);
+      if(!o){toast("La ID no está en la planificación MSR actual",true);return;}
+      makeAdminSnapshot(`Antes de editar línea MSR ${id}`);
+
+      const description=prompt("ORDEN DE TRABAJO",o.description||"");
+      if(description===null)return;
+      const store=prompt("TIENDA",o.store||"");
+      if(store===null)return;
+      const planDate=prompt("FECHA PREVISTA (AAAA-MM-DD)",o.planDate||"");
+      if(planDate===null)return;
+      const planTime=prompt("HORA PREVISTA (HH:MM)",o.planTime||"");
+      if(planTime===null)return;
+      const loadOT=prompt("Nº OT DE CARGA",o.loadOT||"");
+      if(loadOT===null)return;
+      const sourceStatus=prompt("ESTADO ORIGEN / IMPORTADO",o.sourceStatus||"");
+      if(sourceStatus===null)return;
+
+      o.description=String(description).trim();
+      o.store=String(store).trim();
+      o.planDate=String(planDate).trim();
+      o.planTime=String(planTime).trim();
+      o.loadOT=String(loadOT).trim();
+      o.sourceStatus=String(sourceStatus).trim();
+
+      const s=stateFor(id);
+      const shipping=prompt("ENVÍO (No / Parcial / Total)",s.shipping||"No");
+      if(shipping!==null && ["No","Parcial","Total"].includes(shipping))s.shipping=shipping;
+      const serval=prompt("SERVAL (No / Si)",s.serval||"No");
+      if(serval!==null && ["No","Si"].includes(serval))s.serval=serval;
+      const comment=prompt("COMENTARIO",s.comment||"");
+      if(comment!==null)s.comment=String(comment).trim();
+      s.updatedAt=nowISO();
+
+      save();
+      adminNotice=`ID ${id} editada manualmente.\nOrden de trabajo: ${o.description||"—"}\nTienda: ${o.store||"—"}\nPrevisto: ${o.planDate||"—"} ${o.planTime||""}\nEnvío: ${s.shipping}\nServal: ${s.serval}`;
+      render();
+      toast(`✏️ ID ${id} actualizada`);
+      return;
     }
 
     if(action==="export-memory"){
@@ -958,8 +1127,18 @@
         if(s.shipping==="No"&&(s.date||s.time)){
           toast("⚠️ Hay fecha/hora de expedición pero Envío está en No",true);
         }
+        if(field==="serval" && s.serval==="Si" && !String(s.comment||"").trim()){
+          const comment=prompt("🚨 Serval = Sí. Es obligatorio indicar el motivo/comentario:");
+          if(!comment||!String(comment).trim()){
+            s.serval=previous.serval||"No";
+            toast("Serval no se ha activado: falta comentario obligatorio",true);
+            render();
+            return;
+          }
+          s.comment=String(comment).trim();
+        }
         if(s.serval==="Si"&&!String(s.comment||"").trim()){
-          toast("⚠️ Serval = Sí: el comentario es obligatorio",true);
+          toast("🚨 Serval = Sí requiere comentario obligatorio",true);
         }
         if(field==="comment" && s.serval==="Si" && !String(s.comment||"").trim()){
           s.comment=previous.comment||"";
@@ -1270,6 +1449,10 @@
   document.querySelectorAll("#nav button").forEach(b=>b.onclick=()=>go(b.dataset.page));
   $("#menuBtn").onclick=()=>$("#sidebar").classList.toggle("open");
   $("#recalcBtn").onclick=()=>{db=load();toast("Datos actualizados");render()};
+  $("#forceSyncBtn").onclick=()=>forceSync();
+  window.addEventListener("online",()=>{cloudStatus="checking";renderSyncStatus();forceSync();});
+  window.addEventListener("offline",()=>{renderSyncStatus();toast("📴 Sin Internet · trabajando con copia local",true);});
+  renderSyncStatus();
   window.addEventListener("beforeinstallprompt",e=>{e.preventDefault();deferredInstall=e;$("#installBtn").hidden=false});
   $("#installBtn").onclick=async()=>{if(!deferredInstall)return;deferredInstall.prompt();await deferredInstall.userChoice;deferredInstall=null;$("#installBtn").hidden=true};
   window.addEventListener("storage",e=>{if(e.key===STORAGE_KEY){db=load();render()}});
@@ -1279,16 +1462,18 @@
   if("serviceWorker" in navigator)window.addEventListener("load",()=>navigator.serviceWorker.register("./sw.js").catch(console.warn));
 
   async function bootstrapCloud(){
-    if(!window.MSRCloud?.enabled)return;
+    if(!window.MSRCloud?.enabled){cloudStatus="error";lastSyncError="Nube no configurada";renderSyncStatus();return;}
     try{
       const cloud=await window.MSRCloud.load();
       if(cloud && cloud.version){
         db=cloud;
         localStorage.setItem(STORAGE_KEY,JSON.stringify(db));
         render();
+        markCloudOnline();
         toast("Datos sincronizados desde la nube");
       }else{
         await window.MSRCloud.save(db);
+        markCloudOnline();
       }
 
       window.MSRCloud.subscribe(next=>{
@@ -1298,11 +1483,13 @@
         if(incoming===current)return;
         db=next;
         localStorage.setItem(STORAGE_KEY,incoming);
+        markCloudOnline();
         render();
         toast("Cambios recibidos en directo");
       });
     }catch(err){
       console.warn("Cloud load",err);
+      markCloudError(err);
       setTimeout(()=>toast("Nube temporalmente no disponible · la app sigue funcionando en local",true),300);
     }
   }
