@@ -728,7 +728,7 @@
           <table class="data-table report-data-table">
             <thead><tr><th>⏱ Cumplimiento</th><th>🚛 Matrícula</th><th>📅 Previsto</th><th>📥 Llegada</th><th>📌 Estado</th></tr></thead>
             <tbody>${hce.length?hce.map(x=>`<tr class="${hceRowClass(x)}">
-              <td>${timeBadge(hceTiming(x))}</td>
+              <td>${hceComplianceCell(x)}</td>
               <td><strong>${esc(x.number||x.entryId)}</strong></td>
               <td>${fmtDate(x.planDate)} · ${fmtTime(x.planTime)}</td>
               <td>${x.realDate?`${fmtDate(x.realDate)} · ${fmtTime(x.realTime)}`:"—"}</td>
@@ -817,6 +817,125 @@
     </tr>`).join("")}</tbody></table>`;
   }
 
+  function openManualMsrModal(){
+    document.querySelector("#manualEntryModal")?.remove();
+    const overlay=document.createElement("div");
+    overlay.id="manualEntryModal";
+    overlay.className="manual-entry-overlay";
+    overlay.innerHTML=`<div class="manual-entry-shell">
+      <div class="manual-entry-head">
+        <div><span>➕ ALTA MANUAL</span><h2>Nueva orden MSR</h2><p>Úsalo si una orden no aparece en la importación.</p></div>
+        <button id="manualEntryClose">✕</button>
+      </div>
+      <div class="manual-entry-form">
+        <label>Código / ID *<input id="mmId" inputmode="numeric" placeholder="Ej. 450"></label>
+        <label class="wide">Orden de trabajo *<input id="mmWork" placeholder="Ej. 512096_SABELA_2809_07AM"></label>
+        <label>Tienda *<input id="mmStore" placeholder="Tienda / destino"></label>
+        <label>Nº OT carga<input id="mmLoadOT"></label>
+        <label>Fecha prevista *<input id="mmDate" type="date"></label>
+        <label>Hora prevista *<input id="mmTime" type="time"></label>
+        <label>Cadena<input id="mmChain"></label>
+        <label>Estado origen<input id="mmSource" value="Manual"></label>
+      </div>
+      <div class="manual-entry-note">💾 Si esa ID aparece después en una importación, el sistema la detectará como existente/manual y conservará su estado operativo.</div>
+      <div class="manual-entry-actions">
+        <button class="btn ghost" id="manualEntryCancel">Cancelar</button>
+        <button class="btn primary" id="manualEntrySave">💾 Crear ID</button>
+      </div>
+    </div>`;
+    document.body.appendChild(overlay);
+    const close=()=>overlay.remove();
+    overlay.querySelector("#manualEntryClose").onclick=close;
+    overlay.querySelector("#manualEntryCancel").onclick=close;
+    overlay.querySelector("#manualEntrySave").onclick=()=>{
+      const id=idNorm(overlay.querySelector("#mmId").value);
+      const work=overlay.querySelector("#mmWork").value.trim();
+      const store=overlay.querySelector("#mmStore").value.trim();
+      const planDate=overlay.querySelector("#mmDate").value;
+      const planTime=overlay.querySelector("#mmTime").value;
+      if(!id||!/^\d+$/.test(id)||!work||!store||!planDate||!planTime){
+        showEmployeePopup({type:"error",title:"Faltan datos obligatorios",message:"Completa Código, Orden de trabajo, Tienda, Fecha prevista y Hora prevista.",primaryText:"Corregir"});
+        return;
+      }
+      if(db.msr.some(o=>idNorm(o.id)===id)){
+        showEmployeePopup({type:"warning",title:"La ID ya existe",message:`La ID ${id} ya está en el MSR actual. No se ha creado un duplicado.`,primaryText:"Entendido"});
+        return;
+      }
+      const hadMemory=Boolean(db.states[id]);
+      const order={
+        id,description:work,store,
+        loadOT:overlay.querySelector("#mmLoadOT").value.trim(),
+        planDate,planTime,
+        chain:overlay.querySelector("#mmChain").value.trim(),
+        sourceStatus:overlay.querySelector("#mmSource").value.trim()||"Manual",
+        manual:true,manualCreatedAt:nowISO()
+      };
+      db.msr.push(order);
+      db.msr.sort((a,b)=>(`${a.planDate}${a.planTime}${a.id}`).localeCompare(`${b.planDate}${b.planTime}${b.id}`));
+      stateFor(id);
+      logAudit("msr",id,"Alta manual",{order}, "empleado");
+      save();
+      close();
+      toast(hadMemory?"✅ ID creada y memoria histórica recuperada":"✅ ID manual creada");
+      render();
+    };
+  }
+
+  function openManualHceModal(){
+    document.querySelector("#manualEntryModal")?.remove();
+    const overlay=document.createElement("div");
+    overlay.id="manualEntryModal";
+    overlay.className="manual-entry-overlay";
+    overlay.innerHTML=`<div class="manual-entry-shell">
+      <div class="manual-entry-head">
+        <div><span>➕ ALTA MANUAL</span><h2>Nuevo contenedor HCE</h2><p>Úsalo si un contenedor/entrada no aparece en el fichero.</p></div>
+        <button id="manualEntryClose">✕</button>
+      </div>
+      <div class="manual-entry-form">
+        <label>Matrícula / contenedor *<input id="mhNumber" placeholder="Ej. MSKU4731708"></label>
+        <label>ID entrada<input id="mhEntry"></label>
+        <label>Fecha prevista *<input id="mhDate" type="date"></label>
+        <label>Hora prevista *<input id="mhTime" type="time"></label>
+        <label>Transportista<input id="mhTransporter"></label>
+        <label class="wide">Razón / descripción<input id="mhReason"></label>
+      </div>
+      <div class="manual-entry-actions">
+        <button class="btn ghost" id="manualEntryCancel">Cancelar</button>
+        <button class="btn primary" id="manualEntrySave">💾 Crear HCE</button>
+      </div>
+    </div>`;
+    document.body.appendChild(overlay);
+    const close=()=>overlay.remove();
+    overlay.querySelector("#manualEntryClose").onclick=close;
+    overlay.querySelector("#manualEntryCancel").onclick=close;
+    overlay.querySelector("#manualEntrySave").onclick=()=>{
+      const number=overlay.querySelector("#mhNumber").value.trim().toUpperCase();
+      const entryId=overlay.querySelector("#mhEntry").value.trim();
+      const planDate=overlay.querySelector("#mhDate").value;
+      const planTime=overlay.querySelector("#mhTime").value;
+      if(!number||!planDate||!planTime){
+        showEmployeePopup({type:"error",title:"Faltan datos obligatorios",message:"Completa Matrícula/contenedor, Fecha prevista y Hora prevista.",primaryText:"Corregir"});
+        return;
+      }
+      const key=number;
+      if(db.hce.some(x=>String(x.key||x.number||"").toUpperCase()===key)){
+        showEmployeePopup({type:"warning",title:"El HCE ya existe",message:`${number} ya está cargado. No se ha creado un duplicado.`,primaryText:"Entendido"});
+        return;
+      }
+      const item={
+        key,number,entryId,entryIds:entryId?[entryId]:[],planDate,planTime,
+        transporter:overlay.querySelector("#mhTransporter").value.trim(),
+        reason:overlay.querySelector("#mhReason").value.trim(),
+        plannedQty:0,lines:1,realDate:"",realTime:"",process:"Pendiente de recibir",
+        updatedAt:null,manual:true,manualCreatedAt:nowISO()
+      };
+      db.hce.push(item);
+      db.hce.sort((a,b)=>(`${a.planDate}${a.planTime}`).localeCompare(`${b.planDate}${b.planTime}`));
+      logAudit("hce",key,"Alta manual",{item},"empleado");
+      save();close();toast("✅ HCE manual creado");render();
+    };
+  }
+
   function renderResumen(){
     let rows=orderRows();
 
@@ -839,6 +958,7 @@
             <p>${rows.length} órdenes visibles de ${db.msr.length}. Los cambios se guardan automáticamente.</p>
           </div>
           <div class="actions">
+            <button class="btn primary" id="addManualMSRBtn">➕ Añadir ID manual</button>
             <button class="btn ghost" id="resetSummaryFilters">Limpiar filtros</button>
             <button class="btn danger-soft" id="clearMSRBtn">🧹 Limpiar MSR</button>
           </div>
@@ -906,17 +1026,46 @@
 
   function hceTiming(c){
     const p=dt(c.planDate,c.planTime);
-    if(!p)return {label:"⚪ SIN PREVISIÓN",hours:null,kind:"gray"};
+    if(!p)return {label:"⚪ SIN PREVISIÓN",hours:null,kind:"gray",state:"unknown",level:0,detail:"No hay fecha/hora prevista"};
     const a=dt(c.realDate,c.realTime);
-    const ref=a||new Date();
-    const diff=ref-p;
-    const label=exactDurationLabel(diff);
+    const now=new Date();
+
     if(a){
-      if(diff<=0)return {label:`🟢 A TIEMPO · ${label} antes`,hours:diff/36e5,kind:"green"};
-      return {label:`🔴 TARDE · ${label}`,hours:diff/36e5,kind:"red"};
+      const diff=a-p;
+      const hours=diff/36e5;
+      const amount=exactDurationLabel(diff);
+      if(diff<=0)return {label:`🟢 LLEGÓ A TIEMPO · ${amount} antes`,hours,kind:"green",state:"arrived-ontime",level:0,detail:`Llegada registrada ${fmtDate(c.realDate)} · ${fmtTime(c.realTime)}`};
+      const level=hours>=24?4:hours>=8?3:hours>=2?2:1;
+      return {label:`🔴 LLEGÓ TARDE · ${amount}`,hours,kind:"red",state:"arrived-late",level,detail:`Llegó ${amount} después de la hora prevista`};
     }
-    if(diff>0)return {label:`🔴 RETRASO · ${label}`,hours:diff/36e5,kind:"red"};
-    return {label:`🔵 FALTAN · ${label}`,hours:diff/36e5,kind:"blue"};
+
+    const diff=now-p;
+    const hours=diff/36e5;
+    const amount=exactDurationLabel(diff);
+    if(diff>0){
+      const level=hours>=24?4:hours>=8?3:hours>=2?2:1;
+      return {label:`🔴 AÚN NO HA LLEGADO · ${amount} de retraso`,hours,kind:"red",state:"missing-late",level,detail:`Previsto ${fmtDate(c.planDate)} · ${fmtTime(c.planTime)}`};
+    }
+    return {label:`🔵 AÚN NO HA LLEGADO · faltan ${amount}`,hours,kind:"blue",state:"missing-ontime",level:0,detail:`Previsto ${fmtDate(c.planDate)} · ${fmtTime(c.planTime)}`};
+  }
+
+  function hceComplianceCell(c){
+    const info=hceTiming(c);
+    const cls=info.kind==="green"?"hce-cmp-green":info.kind==="blue"?"hce-cmp-blue":info.kind==="red"?`hce-cmp-red-${info.level||1}`:"hce-cmp-gray";
+    const subtitle=info.state==="arrived-late"
+      ? "Llegada registrada fuera de plazo"
+      :info.state==="missing-late"
+      ? "Sin llegada registrada y fuera de plazo"
+      :info.state==="arrived-ontime"
+      ? "Llegada registrada dentro de plazo"
+      :info.state==="missing-ontime"
+      ? "Pendiente de llegada, todavía dentro de plazo"
+      :"Sin cálculo";
+    return `<div class="hce-compliance ${cls}">
+      <strong>${esc(info.label)}</strong>
+      <span>${esc(subtitle)}</span>
+      <small>${esc(info.detail||"")}</small>
+    </div>`;
   }
 
   function timeBadge(info){
@@ -958,6 +1107,7 @@
         <div class="panel-head">
           <div><h2>Contenedores HCE</h2><p>Introduce fecha y hora de llegada. Al completarlas pasa automáticamente a Posicionado.</p></div>
           <div class="actions">
+            <button class="btn primary" id="addManualHCEBtn">➕ Añadir HCE manual</button>
             <button class="btn ghost" id="resetHCEFilters">Limpiar filtros</button>
             <button class="btn danger-soft" id="clearHCEBtn">🧹 Limpiar HCE</button>
           </div>
@@ -978,7 +1128,7 @@
     if(!rows.length)return `<div class="empty">No hay contenedores HCE con estos filtros.</div>`;
     return `<table class="data-table hce-table simple-hce"><thead><tr><th>Cumplimiento</th><th>Matrícula</th><th>Fecha prevista</th><th>Hora prevista</th><th>Fecha llegada</th><th>Hora llegada</th><th>Estado</th></tr></thead>
       <tbody>${rows.map(x=>`<tr class="${hceRowClass(x)}">
-        <td>${timeBadge(hceTiming(x))}</td>
+        <td>${hceComplianceCell(x)}</td>
         <td><strong>${esc(x.number||x.entryId)}</strong></td>
         <td>${fmtDate(x.planDate)}</td>
         <td>${fmtTime(x.planTime)}</td>
@@ -1705,6 +1855,9 @@
   }
 
   function bindPage(){
+    const addManualMSR=$("#addManualMSRBtn"); if(addManualMSR)addManualMSR.onclick=()=>openManualMsrModal();
+    const addManualHCE=$("#addManualHCEBtn"); if(addManualHCE)addManualHCE.onclick=()=>openManualHceModal();
+
     document.querySelectorAll("[data-go]").forEach(x=>x.onclick=()=>go(x.dataset.go));
     document.querySelectorAll("[data-summary-filter]").forEach(x=>x.onclick=()=>{summaryFilter=x.dataset.summaryFilter;render()});
     const sdf=$("#summaryDateFilter"); if(sdf)sdf.onchange=()=>{summaryDateFilter=sdf.value;render()};
