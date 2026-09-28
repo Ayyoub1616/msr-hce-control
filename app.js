@@ -19,7 +19,6 @@
   let summaryDateFilter = "all";
   let summaryDateFrom = "";
   let summaryDateTo = "";
-  let summaryStateFilter = "all";
   let summaryShippingFilter = "all";
   let summaryServalFilter = "all";
   let summaryTextFilter = "";
@@ -263,18 +262,17 @@
     const val=({o,s})=>{
       if(summarySortKey==="planDateTime")return `${o.planDate||""} ${o.planTime||""}`;
       if(summarySortKey==="id")return Number(o.id)||0;
-      if(summarySortKey==="status")return s.status||"";
-      if(summarySortKey==="shipping")return s.shipping||"";
-      if(summarySortKey==="serval")return s.serval||"";
-      if(summarySortKey==="timing"){
-        const p=plannedFor(o),a=actualFor(o,s),r=a||new Date();
-        return p?(r-p):0;
-      }
+      if(summarySortKey==="store")return o.store||"";
+      if(summarySortKey==="shipping")return s.shipping||"No";
+      if(summarySortKey==="sendDateTime")return `${s.date||""} ${s.time||""}`;
+      if(summarySortKey==="serval")return s.serval||"No";
       return "";
     };
     return rows.sort((a,b)=>{
       const va=val(a),vb=val(b);
-      const cmp=typeof va==="number"&&typeof vb==="number"?va-vb:String(va).localeCompare(String(vb),"es",{numeric:true});
+      const cmp=typeof va==="number"&&typeof vb==="number"
+        ? va-vb
+        : String(va).localeCompare(String(vb),"es",{numeric:true,sensitivity:"base"});
       return summarySortDir==="desc"?-cmp:cmp;
     });
   }
@@ -282,67 +280,108 @@
   function tableOrders(rows,compact=false){
     const rr=rows.map(x=>x.o?x:{o:x,s:stateFor(x.id)});
     if(!rr.length)return `<div class="empty">No hay órdenes MSR con estos filtros.</div>`;
+
     if(compact){
-      return `<table class="data-table"><thead><tr><th>Cumplimiento</th><th>ID</th><th>Descripción</th></tr></thead><tbody>${rr.map(({o,s})=>`<tr><td>${msrTimeBadge(o,s)}</td><td><strong>${esc(o.id)}</strong></td><td class="wrap">${esc(o.description||"")}</td></tr>`).join("")}</tbody></table>`;
+      return `<table class="data-table"><thead><tr><th>Código</th><th>Orden de trabajo</th><th>Tienda</th></tr></thead><tbody>${rr.map(({o})=>`<tr><td><strong>${esc(o.id)}</strong></td><td class="wrap">${esc(o.description||"")}</td><td>${esc(o.store||"")}</td></tr>`).join("")}</tbody></table>`;
     }
+
     return `<table class="data-table msr-table"><thead><tr>
-      <th>Cumplimiento</th><th>ID</th><th>Descripción</th><th>Estado reparto</th><th>Envío</th><th>Fecha expedición</th><th>Hora expedición</th><th>Serval</th><th>Comentario</th>
-      </tr></thead><tbody>${rr.map(({o,s})=>`<tr class="${s.serval==="Si"?"serval-alert":""}">
-        <td class="msr-situation">${msrTimeBadge(o,s)}</td>
-        <td><strong>${esc(o.id)}</strong></td>
-        <td class="wrap msr-description">${esc(o.description||"")}</td>
-        <td><select class="msr-edit msr-select" data-msr-id="${esc(o.id)}" data-msr-field="status">${msrOptions(s.status||"Pendiente",["Pendiente","En proceso","Finalizado"])}</select></td>
-        <td><select class="msr-edit msr-select" data-msr-id="${esc(o.id)}" data-msr-field="shipping">${msrOptions(s.shipping||"No",["No","Parcial","Total"])}</select></td>
-        <td><input class="msr-edit msr-date" type="date" data-msr-id="${esc(o.id)}" data-msr-field="date" value="${esc(s.date||"")}"></td>
-        <td><input class="msr-edit msr-time" type="time" data-msr-id="${esc(o.id)}" data-msr-field="time" value="${esc(s.time||"")}"></td>
-        <td><select class="msr-edit msr-select-short ${s.serval==="Si"?"serval-field":""}" data-msr-id="${esc(o.id)}" data-msr-field="serval">${msrOptions(s.serval||"No",["No","Si"])}</select></td>
-        <td><textarea class="msr-edit msr-comment ${s.serval==="Si"?"serval-field":""}" rows="2" data-msr-id="${esc(o.id)}" data-msr-field="comment" placeholder="Comentario">${esc(s.comment||"")}</textarea></td>
-      </tr>`).join("")}</tbody></table>`;
+      <th>Código</th>
+      <th>Orden de trabajo</th>
+      <th>Tienda</th>
+      <th>Envío</th>
+      <th>Fecha expedición</th>
+      <th>Hora expedición</th>
+      <th>Serval</th>
+      <th>Comentario</th>
+    </tr></thead><tbody>${rr.map(({o,s})=>`<tr class="${s.serval==="Si"?"serval-alert":""}">
+      <td><strong>${esc(o.id)}</strong></td>
+      <td class="wrap msr-description">${esc(o.description||"")}</td>
+      <td>${esc(o.store||"")}</td>
+      <td><select class="msr-edit msr-select" data-msr-id="${esc(o.id)}" data-msr-field="shipping">${msrOptions(s.shipping||"No",["No","Parcial","Total"])}</select></td>
+      <td><input class="msr-edit msr-date" type="date" data-msr-id="${esc(o.id)}" data-msr-field="date" value="${esc(s.date||"")}"></td>
+      <td><input class="msr-edit msr-time" type="time" data-msr-id="${esc(o.id)}" data-msr-field="time" value="${esc(s.time||"")}"></td>
+      <td><select class="msr-edit msr-select-short ${s.serval==="Si"?"serval-field":""}" data-msr-id="${esc(o.id)}" data-msr-field="serval">${msrOptions(s.serval||"No",["No","Si"])}</select></td>
+      <td><textarea class="msr-edit msr-comment ${s.serval==="Si"?"serval-field":""}" rows="2" data-msr-id="${esc(o.id)}" data-msr-field="comment" placeholder="Comentario">${esc(s.comment||"")}</textarea></td>
+    </tr>`).join("")}</tbody></table>`;
   }
 
   function renderResumen(){
     let rows=orderRows();
+
     if(summaryDateFilter!=="all")rows=rows.filter(({o})=>o.planDate===summaryDateFilter);
-    if(summaryDateFrom)rows=rows.filter(({o})=>o.planDate&&o.planDate>=summaryDateFrom);
-    if(summaryDateTo)rows=rows.filter(({o})=>o.planDate&&o.planDate<=summaryDateTo);
-    if(summaryStateFilter!=="all")rows=rows.filter(({s})=>(s.status||"Pendiente")===summaryStateFilter);
     if(summaryShippingFilter!=="all")rows=rows.filter(({s})=>(s.shipping||"No")===summaryShippingFilter);
     if(summaryServalFilter!=="all")rows=rows.filter(({s})=>(s.serval||"No")===summaryServalFilter);
-    if(summaryIdsFilter.length)rows=rows.filter(({o})=>summaryIdsFilter.includes(idNorm(o.id)));
     if(summaryTextFilter){
       const q=norm(summaryTextFilter);
-      rows=rows.filter(({o,s})=>norm([o.id,o.description,s.comment].join(" ")).includes(q));
+      rows=rows.filter(({o,s})=>norm([o.id,o.description,o.store,s.comment].join(" ")).includes(q));
     }
     rows=sortSummaryRows(rows);
 
     const dates=[...new Set(db.msr.map(o=>o.planDate).filter(Boolean))].sort();
+
     content.innerHTML=`
       <div class="panel" style="margin-top:0">
         <div class="panel-head">
-          <div><h2>Resumen MSR</h2><p>${rows.length} órdenes visibles de ${db.msr.length}. Edita directamente; se guarda automáticamente.</p></div>
+          <div>
+            <h2>Resumen MSR</h2>
+            <p>${rows.length} órdenes visibles de ${db.msr.length}. Los cambios se guardan automáticamente.</p>
+          </div>
           <button class="btn ghost" id="resetSummaryFilters">Limpiar filtros</button>
         </div>
+
         <div class="simple-filter-grid">
-          <label>Fecha<select id="summaryDateFilter" class="filter-input"><option value="all">Todas</option>${dates.map(d=>`<option value="${esc(d)}" ${summaryDateFilter===d?"selected":""}>${fmtDate(d)}</option>`).join("")}</select></label>
-          <label>Desde<input id="summaryDateFrom" class="filter-input" type="date" value="${esc(summaryDateFrom)}"></label>
-          <label>Hasta<input id="summaryDateTo" class="filter-input" type="date" value="${esc(summaryDateTo)}"></label>
-          <label>Estado reparto<select id="summaryStateFilter" class="filter-input">${msrOptions(summaryStateFilter,["all","Pendiente","En proceso","Finalizado"])}</select></label>
-          <label>Envío<select id="summaryShippingFilter" class="filter-input">${msrOptions(summaryShippingFilter,["all","No","Parcial","Total"])}</select></label>
-          <label>Serval<select id="summaryServalFilter" class="filter-input">${msrOptions(summaryServalFilter,["all","No","Si"])}</select></label>
-          <label>Buscar<input id="summaryTextFilter" class="filter-input" placeholder="ID o descripción" value="${esc(summaryTextFilter)}"></label>
-          <label>Ordenar<select id="summarySortKey" class="filter-input">
-            <option value="planDateTime" ${summarySortKey==="planDateTime"?"selected":""}>Fecha + hora prevista</option>
-            <option value="id" ${summarySortKey==="id"?"selected":""}>ID</option>
-            <option value="status" ${summarySortKey==="status"?"selected":""}>Estado reparto</option>
-            <option value="shipping" ${summarySortKey==="shipping"?"selected":""}>Envío</option>
-            <option value="serval" ${summarySortKey==="serval"?"selected":""}>Serval</option>
-            <option value="timing" ${summarySortKey==="timing"?"selected":""}>Cumplimiento</option>
-          </select></label>
-          <label>Dirección<select id="summarySortDir" class="filter-input"><option value="asc" ${summarySortDir==="asc"?"selected":""}>Ascendente</option><option value="desc" ${summarySortDir==="desc"?"selected":""}>Descendente</option></select></label>
+          <label>Fecha
+            <select id="summaryDateFilter" class="filter-input">
+              <option value="all">Todas las fechas</option>
+              ${dates.map(d=>`<option value="${esc(d)}" ${summaryDateFilter===d?"selected":""}>${fmtDate(d)}</option>`).join("")}
+            </select>
+          </label>
+
+          <label>Envío
+            <select id="summaryShippingFilter" class="filter-input">
+              <option value="all" ${summaryShippingFilter==="all"?"selected":""}>Todos</option>
+              <option value="No" ${summaryShippingFilter==="No"?"selected":""}>No</option>
+              <option value="Parcial" ${summaryShippingFilter==="Parcial"?"selected":""}>Parcial</option>
+              <option value="Total" ${summaryShippingFilter==="Total"?"selected":""}>Total</option>
+            </select>
+          </label>
+
+          <label>Serval
+            <select id="summaryServalFilter" class="filter-input">
+              <option value="all" ${summaryServalFilter==="all"?"selected":""}>Todos</option>
+              <option value="No" ${summaryServalFilter==="No"?"selected":""}>No</option>
+              <option value="Si" ${summaryServalFilter==="Si"?"selected":""}>Sí</option>
+            </select>
+          </label>
+
+          <label>Buscar
+            <input id="summaryTextFilter" class="filter-input" placeholder="Código, orden, tienda..." value="${esc(summaryTextFilter)}">
+          </label>
+
+          <label>Ordenar por
+            <select id="summarySortKey" class="filter-input">
+              <option value="planDateTime" ${summarySortKey==="planDateTime"?"selected":""}>Fecha prevista</option>
+              <option value="id" ${summarySortKey==="id"?"selected":""}>Código</option>
+              <option value="store" ${summarySortKey==="store"?"selected":""}>Tienda</option>
+              <option value="shipping" ${summarySortKey==="shipping"?"selected":""}>Envío</option>
+              <option value="sendDateTime" ${summarySortKey==="sendDateTime"?"selected":""}>Fecha/hora expedición</option>
+              <option value="serval" ${summarySortKey==="serval"?"selected":""}>Serval</option>
+            </select>
+          </label>
+
+          <label>Dirección
+            <select id="summarySortDir" class="filter-input">
+              <option value="asc" ${summarySortDir==="asc"?"selected":""}>Ascendente</option>
+              <option value="desc" ${summarySortDir==="desc"?"selected":""}>Descendente</option>
+            </select>
+          </label>
         </div>
+
         <div class="table-wrap">${tableOrders(rows)}</div>
       </div>`;
   }
+
   function filterBtn(key,label){return `<button class="btn ${summaryFilter===key?"primary":"ghost"}" data-summary-filter="${esc(key)}">${label}</button>`}
 
 
@@ -442,7 +481,7 @@
         </div>
         <div class="notice ${msr?"":"warn"}" style="margin-top:16px">
           ${msr
-            ?"Las órdenes que ya tengan estado manual conservarán Total/Parcial, pallets, Serval y comentarios."
+            ?"Las órdenes ya existentes conservarán Envío, fecha/hora de expedición, Serval y comentarios."
             :"Una nueva importación HCE agrupa todas las líneas por MATRÍCULA. El checklist del mismo contenedor se conserva."}
         </div>
         <div class="preview">
@@ -494,18 +533,13 @@
     document.querySelectorAll("[data-go]").forEach(x=>x.onclick=()=>go(x.dataset.go));
     document.querySelectorAll("[data-summary-filter]").forEach(x=>x.onclick=()=>{summaryFilter=x.dataset.summaryFilter;render()});
     const sdf=$("#summaryDateFilter"); if(sdf)sdf.onchange=()=>{summaryDateFilter=sdf.value;render()};
-    const sfrom=$("#summaryDateFrom"); if(sfrom)sfrom.onchange=()=>{summaryDateFrom=sfrom.value;summaryDateFilter="all";render()};
-    const sto=$("#summaryDateTo"); if(sto)sto.onchange=()=>{summaryDateTo=sto.value;summaryDateFilter="all";render()};
-    const ssit=$("#summarySituationFilter"); if(ssit)ssit.onchange=()=>{summaryFilter=ssit.value;render()};
-    const sstate=$("#summaryStateFilter"); if(sstate)sstate.onchange=()=>{summaryStateFilter=sstate.value;render()};
     const sship=$("#summaryShippingFilter"); if(sship)sship.onchange=()=>{summaryShippingFilter=sship.value;render()};
     const sserv=$("#summaryServalFilter"); if(sserv)sserv.onchange=()=>{summaryServalFilter=sserv.value;render()};
     const stext=$("#summaryTextFilter"); if(stext)stext.onchange=()=>{summaryTextFilter=stext.value;render()};
-    const sids=$("#summaryIdsFilter"); if(sids)sids.onchange=()=>{summaryIdsFilter=[...new Set(sids.value.split(/[\s,;|]+/).map(idNorm).filter(Boolean))];render()};
     const skey=$("#summarySortKey"); if(skey)skey.onchange=()=>{summarySortKey=skey.value;render()};
     const sdir=$("#summarySortDir"); if(sdir)sdir.onchange=()=>{summarySortDir=sdir.value;render()};
     const sreset=$("#resetSummaryFilters"); if(sreset)sreset.onclick=()=>{
-      summaryFilter="all";summaryDateFilter="all";summaryDateFrom="";summaryDateTo="";summaryStateFilter="all";summaryShippingFilter="all";summaryServalFilter="all";summaryTextFilter="";summaryIdsFilter=[];summarySortKey="planDateTime";summarySortDir="asc";render();
+      summaryFilter="all";summaryDateFilter="all";summaryShippingFilter="all";summaryServalFilter="all";summaryTextFilter="";summarySortKey="planDateTime";summarySortDir="asc";render();
     };
 
     document.querySelectorAll("[data-msr-id][data-msr-field]").forEach(el=>{
@@ -515,7 +549,6 @@
         s[field]=el.value;
         if(s.date&&s.time&&s.shipping==="No")toast("Has indicado fecha/hora de expedición pero Envío sigue en No",true);
         if(s.shipping!=="No"&&(!s.date||!s.time))toast("Completa fecha y hora de expedición",true);
-        if(s.status==="Finalizado"&&s.shipping==="No")toast("Reparto finalizado: revisa si debe marcarse el envío",true);
         if(s.serval==="Si"&&!String(s.comment||"").trim())toast("Serval = Sí requiere comentario",true);
         s.updatedAt=nowISO();
         save();
