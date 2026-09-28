@@ -4,6 +4,7 @@
 
   const STORAGE_KEY = "msr_hce_control_v1";
   const ADMIN_UNDO_KEY = "msr_hce_admin_undo_v1";
+  const CLOUD_CONFLICT_KEY = "msr_hce_cloud_conflict_v1";
   const VERSION = 1;
   const defaultData = () => ({
     version: VERSION,
@@ -379,6 +380,20 @@
     return -1;
   };
   const pick=(row,idx,def="")=>idx>=0?(row[idx]??def):def;
+
+  function recordAppError(error,context="app"){
+    try{
+      db.meta.errorLog=Array.isArray(db.meta.errorLog)?db.meta.errorLog:[];
+      db.meta.errorLog.unshift({
+        at:nowISO(),
+        context,
+        message:error?.message||String(error||"Error desconocido"),
+        stack:String(error?.stack||"").slice(0,3000)
+      });
+      if(db.meta.errorLog.length>100)db.meta.errorLog.length=100;
+      localStorage.setItem(STORAGE_KEY,JSON.stringify(db));
+    }catch{}
+  }
 
   function logAudit(entityType,id,action,changes={},source="empleado"){
     db.meta.auditLog=Array.isArray(db.meta.auditLog)?db.meta.auditLog:[];
@@ -1262,18 +1277,19 @@
     };
     rows.sort((a,b)=>{const va=hv(a),vb=hv(b);const cmp=typeof va==="number"?va-vb:String(va).localeCompare(String(vb),"es",{numeric:true});return hceSortDir==="desc"?-cmp:cmp;});
 
+    const totalFiltered=rows.length;
+    const maxPage=Math.max(1,Math.ceil(totalFiltered/hcePageSize));
+    if(hcePage>maxPage)hcePage=maxPage;
+    const visibleRows=rows.slice((hcePage-1)*hcePageSize,hcePage*hcePageSize);
+
     content.innerHTML=`
       <div class="panel" style="margin-top:0">
         <div class="panel-head">
-          <div><h2>Contenedores HCE</h2><p>Introduce fecha y hora de llegada. Al completarlas pasa automáticamente a Posicionado.</p></div>
-          <div class="actions">
-            <button class="btn primary" id="addManualHCEBtn">➕ Añadir HCE manual</button>
-            <button class="btn ghost" id="resetHCEFilters">Limpiar filtros</button>
-            <button class="btn danger-soft" id="clearHCEBtn">🧹 Limpiar HCE</button>
-          </div>
+          <div><h2>🚛 Contenedores HCE</h2><p>${totalFiltered} registros visibles de ${db.hce.length}. Registra la llegada antes de avanzar el estado.</p></div>
+          <div class="actions"><button class="btn primary" id="addManualHCEBtn">➕ Añadir HCE manual</button><button class="btn ghost" id="resetHCEFilters">🧹 Limpiar filtros</button><button class="btn danger-soft" id="clearHCEBtn">🗑️ Vaciar HCE</button></div>
         </div>
         <div class="operational-help hce-help">
-          <div class="help-title">🚛 ¿Qué significa el estado HCE?</div>
+          <div class="help-title">🧭 Guía rápida HCE</div>
           <div class="help-items">
             <span class="help-item neutral"><b>⏳ Pendiente</b><small>Todavía no ha llegado.</small></span>
             <span class="help-item info"><b>📍 Posicionado</b><small>Ya llegó y está ubicado.</small></span>
@@ -1284,12 +1300,13 @@
         <div class="simple-filter-grid hce-simple-filters">
           <label>Desde<input id="hceDateFrom" class="filter-input" type="date" value="${esc(hceDateFrom)}"></label>
           <label>Hasta<input id="hceDateTo" class="filter-input" type="date" value="${esc(hceDateTo)}"></label>
-          <label>Estado<select id="hceProcessFilter" class="filter-input">${msrOptions(hceProcessFilter,["all","Pendiente de recibir","Posicionado","Descargando","Descargado"])}</select></label>
-          <label>Cumplimiento<select id="hceTimingFilter" class="filter-input"><option value="all" ${hceTimingFilter==="all"?"selected":""}>Todos</option><option value="ontime" ${hceTimingFilter==="ontime"?"selected":""}>A tiempo</option><option value="late" ${hceTimingFilter==="late"?"selected":""}>Retraso</option><option value="pending" ${hceTimingFilter==="pending"?"selected":""}>Pendientes</option></select></label>
+          <label>Estado<select id="hceProcessFilter" class="filter-input"><option value="all" ${hceProcessFilter==="all"?"selected":""}>📌 Todos</option><option value="Pendiente de recibir" ${hceProcessFilter==="Pendiente de recibir"?"selected":""}>⏳ Pendiente</option><option value="Posicionado" ${hceProcessFilter==="Posicionado"?"selected":""}>📍 Posicionado</option><option value="Descargando" ${hceProcessFilter==="Descargando"?"selected":""}>🔄 Descargando</option><option value="Descargado" ${hceProcessFilter==="Descargado"?"selected":""}>✅ Descargado</option></select></label>
+          <label>Cumplimiento<select id="hceTimingFilter" class="filter-input"><option value="all" ${hceTimingFilter==="all"?"selected":""}>⏱ Todos</option><option value="ontime" ${hceTimingFilter==="ontime"?"selected":""}>🟢 A tiempo</option><option value="late" ${hceTimingFilter==="late"?"selected":""}>🔴 Retraso</option><option value="pending" ${hceTimingFilter==="pending"?"selected":""}>🔵 Sin llegada</option></select></label>
           <label>Ordenar<select id="hceSortKey" class="filter-input"><option value="planDateTime" ${hceSortKey==="planDateTime"?"selected":""}>Fecha + hora</option><option value="number" ${hceSortKey==="number"?"selected":""}>Matrícula</option><option value="process" ${hceSortKey==="process"?"selected":""}>Estado</option><option value="timing" ${hceSortKey==="timing"?"selected":""}>Cumplimiento</option></select></label>
-          <label>Dirección<select id="hceSortDir" class="filter-input"><option value="asc" ${hceSortDir==="asc"?"selected":""}>Ascendente</option><option value="desc" ${hceSortDir==="desc"?"selected":""}>Descendente</option></select></label>
+          <label>Dirección<select id="hceSortDir" class="filter-input"><option value="asc" ${hceSortDir==="asc"?"selected":""}>↑ Ascendente</option><option value="desc" ${hceSortDir==="desc"?"selected":""}>↓ Descendente</option></select></label>
         </div>
-        <div class="table-wrap">${tableHCE(rows)}</div>
+        <div class="table-wrap operational-table-wrap">${tableHCE(visibleRows)}</div>
+        ${pagerHtml("hce",hcePage,hcePageSize,totalFiltered)}
       </div>`;
   }
 
@@ -1576,12 +1593,18 @@
         <h3>🧾 Incidencias de la última importación</h3>
         ${!r?`<div class="admin-editor-empty compact"><span>✅</span><strong>No hay informe reciente</strong></div>`
         :!issues.length?`<div class="import-clean">✅ La última importación no tuvo incidencias.</div>`
-        :`<div class="issue-list admin-modal-issues">${issues.slice(0,100).map(x=>`
+        :`<div class="issue-list admin-modal-issues">${issues.slice(0,100).map(x=>{const i=importIssueFix(x,r?.kind||"msr");return `
           <div class="issue-item ${x.level}">
-            <b>${x.level==="error"?"❌":"⚠️"} Línea ${x.line}</b>
-            <span>${esc(x.message)}</span>
-            ${x.value?`<code>${esc(x.value)}</code>`:""}
-          </div>`).join("")}</div>`}
+            <b>${x.level==="error"?"❌":"⚠️"} Línea ${i.line}</b>
+            <span><strong>${esc(i.problem)}</strong><small>→ ${esc(i.fix)}</small></span>
+            ${i.value?`<code>${esc(i.value)}</code>`:""}
+          </div>`}).join("")}</div>`}
+      </div>
+      <div class="admin-modal-subsection">
+        <h3>🩺 Errores técnicos recientes</h3>
+        ${(db.meta.errorLog||[]).length?`<div class="tech-error-list">${(db.meta.errorLog||[]).slice(0,20).map(x=>`
+          <div class="tech-error-item"><strong>${new Date(x.at).toLocaleString("es-ES")} · ${esc(x.context||"app")}</strong><small>${esc(x.message||"Error")}</small></div>
+        `).join("")}</div>`:"<div class=\"history-empty\">No hay errores técnicos registrados.</div>"}
       </div>
       <div class="admin-modal-subsection">
         <h3>📚 Historial de importaciones</h3>
@@ -2084,15 +2107,20 @@
 
     document.querySelectorAll("[data-go]").forEach(x=>x.onclick=()=>go(x.dataset.go));
     document.querySelectorAll("[data-summary-filter]").forEach(x=>x.onclick=()=>{summaryFilter=x.dataset.summaryFilter;render()});
-    const sdf=$("#summaryDateFilter"); if(sdf)sdf.onchange=()=>{summaryDateFilter=sdf.value;render()};
-    const sship=$("#summaryShippingFilter"); if(sship)sship.onchange=()=>{summaryShippingFilter=sship.value;render()};
-    const sserv=$("#summaryServalFilter"); if(sserv)sserv.onchange=()=>{summaryServalFilter=sserv.value;render()};
-    const stext=$("#summaryTextFilter"); if(stext)stext.onchange=()=>{summaryTextFilter=stext.value;render()};
-    const skey=$("#summarySortKey"); if(skey)skey.onchange=()=>{summarySortKey=skey.value;render()};
-    const sdir=$("#summarySortDir"); if(sdir)sdir.onchange=()=>{summarySortDir=sdir.value;render()};
+    const sdf=$("#summaryDateFilter"); if(sdf)sdf.onchange=()=>{summaryDateFilter=sdf.value;summaryPage=1;render()};
+    const spick=$("#summaryPickingFilter"); if(spick)spick.onchange=()=>{summaryPickingFilter=spick.value;summaryPage=1;render()};
+    const sship=$("#summaryShippingFilter"); if(sship)sship.onchange=()=>{summaryShippingFilter=sship.value;summaryPage=1;render()};
+    const sserv=$("#summaryServalFilter"); if(sserv)sserv.onchange=()=>{summaryServalFilter=sserv.value;summaryPage=1;render()};
+    const stext=$("#summaryTextFilter"); if(stext)stext.oninput=()=>{summaryTextFilter=stext.value;summaryPage=1;render()};
+    const skey=$("#summarySortKey"); if(skey)skey.onchange=()=>{summarySortKey=skey.value;summaryPage=1;render()};
+    const sdir=$("#summarySortDir"); if(sdir)sdir.onchange=()=>{summarySortDir=sdir.value;summaryPage=1;render()};
     const sreset=$("#resetSummaryFilters"); if(sreset)sreset.onclick=()=>{
-      summaryFilter="all";summaryDateFilter="all";summaryShippingFilter="all";summaryServalFilter="all";summaryTextFilter="";summarySortKey="planDateTime";summarySortDir="asc";render();
+      summaryFilter="all";summaryDateFilter="all";summaryShippingFilter="all";summaryServalFilter="all";summaryPickingFilter="all";summaryTextFilter="";summarySortKey="planDateTime";summarySortDir="asc";summaryPage=1;render();
     };
+
+    const summaryPageSizeEl=$("#summaryPageSize"); if(summaryPageSizeEl)summaryPageSizeEl.onchange=()=>{summaryPageSize=Number(summaryPageSizeEl.value)||25;summaryPage=1;render()};
+    const summaryPrev=$("#summaryPrev"); if(summaryPrev)summaryPrev.onclick=()=>{summaryPage=Math.max(1,summaryPage-1);render()};
+    const summaryNext=$("#summaryNext"); if(summaryNext)summaryNext.onclick=()=>{summaryPage+=1;render()};
 
     const clearMSR=$("#clearMSRBtn"); if(clearMSR)clearMSR.onclick=()=>{
       if(!db.msr.length){toast("No hay órdenes MSR para limpiar",true);return;}
@@ -2214,13 +2242,16 @@
       },80);
     };
 
-    const hf=$("#hceDateFrom"); if(hf)hf.onchange=()=>{hceDateFrom=hf.value;render()};
-    const ht=$("#hceDateTo"); if(ht)ht.onchange=()=>{hceDateTo=ht.value;render()};
-    const hpfilter=$("#hceProcessFilter"); if(hpfilter)hpfilter.onchange=()=>{hceProcessFilter=hpfilter.value;render()};
-    const htfilter=$("#hceTimingFilter"); if(htfilter)htfilter.onchange=()=>{hceTimingFilter=htfilter.value;render()};
-    const hsort=$("#hceSortKey"); if(hsort)hsort.onchange=()=>{hceSortKey=hsort.value;render()};
-    const hdir=$("#hceSortDir"); if(hdir)hdir.onchange=()=>{hceSortDir=hdir.value;render()};
-    const hreset=$("#resetHCEFilters"); if(hreset)hreset.onclick=()=>{hceDateFrom="";hceDateTo="";hceProcessFilter="all";hceTimingFilter="all";hceSortKey="planDateTime";hceSortDir="asc";render()};
+    const hf=$("#hceDateFrom"); if(hf)hf.onchange=()=>{hceDateFrom=hf.value;hcePage=1;render()};
+    const ht=$("#hceDateTo"); if(ht)ht.onchange=()=>{hceDateTo=ht.value;hcePage=1;render()};
+    const hpfilter=$("#hceProcessFilter"); if(hpfilter)hpfilter.onchange=()=>{hceProcessFilter=hpfilter.value;hcePage=1;render()};
+    const htfilter=$("#hceTimingFilter"); if(htfilter)htfilter.onchange=()=>{hceTimingFilter=htfilter.value;hcePage=1;render()};
+    const hsort=$("#hceSortKey"); if(hsort)hsort.onchange=()=>{hceSortKey=hsort.value;hcePage=1;render()};
+    const hdir=$("#hceSortDir"); if(hdir)hdir.onchange=()=>{hceSortDir=hdir.value;hcePage=1;render()};
+    const hreset=$("#resetHCEFilters"); if(hreset)hreset.onclick=()=>{hceDateFrom="";hceDateTo="";hceProcessFilter="all";hceTimingFilter="all";hceSortKey="planDateTime";hceSortDir="asc";hcePage=1;render()};
+    const hcePageSizeEl=$("#hcePageSize"); if(hcePageSizeEl)hcePageSizeEl.onchange=()=>{hcePageSize=Number(hcePageSizeEl.value)||25;hcePage=1;render()};
+    const hcePrev=$("#hcePrev"); if(hcePrev)hcePrev.onclick=()=>{hcePage=Math.max(1,hcePage-1);render()};
+    const hceNext=$("#hceNext"); if(hceNext)hceNext.onclick=()=>{hcePage+=1;render()};
 
     document.querySelectorAll("[data-hce-key][data-hce-field]").forEach(el=>{
       el.addEventListener("change",()=>{
@@ -2664,7 +2695,7 @@
     try{
       const cloud=await window.MSRCloud.load();
       if(cloud && cloud.version){
-        db=cloud;
+        db=normalizeData(cloud);
         localStorage.setItem(STORAGE_KEY,JSON.stringify(db));
         render();
         pendingCloudSave=false;
@@ -2680,10 +2711,27 @@
 
       window.MSRCloud.subscribe(next=>{
         if(!next || !next.version)return;
-        const incoming=JSON.stringify(next);
+        const normalized=normalizeData(next);
+        const incoming=JSON.stringify(normalized);
         const current=JSON.stringify(db);
         if(incoming===current)return;
-        db=next;
+
+        if(pendingCloudSave){
+          localStorage.setItem(CLOUD_CONFLICT_KEY,JSON.stringify({at:nowISO(),local:db,remote:normalized}));
+          cloudStatus="error";
+          lastSyncError="Conflicto detectado: hay cambios locales pendientes y cambios nuevos en la nube";
+          renderSyncStatus();
+          showEmployeePopup({
+            type:"warning",
+            title:"Cambios simultáneos detectados",
+            message:"Otro dispositivo ha actualizado la nube mientras este dispositivo tenía cambios pendientes.",
+            details:["No se ha sobrescrito tu trabajo local.","Usa Forzar sincronización o revisa Datos / copias antes de continuar."],
+            primaryText:"Entendido"
+          });
+          return;
+        }
+
+        db=normalized;
         localStorage.setItem(STORAGE_KEY,incoming);
         markCloudOnline();
         render();
@@ -2695,6 +2743,14 @@
       setTimeout(()=>toast("Nube temporalmente no disponible · la app sigue funcionando en local",true),300);
     }
   }
+
+  window.addEventListener("error",event=>{
+    recordAppError(event.error||new Error(event.message||"Error JavaScript"),"window.error");
+  });
+  window.addEventListener("unhandledrejection",event=>{
+    const err=event.reason instanceof Error?event.reason:new Error(String(event.reason||"Promise rechazada"));
+    recordAppError(err,"unhandledrejection");
+  });
 
   const initial=location.hash.replace("#",""); go(pages[initial]?initial:"inicio");
   bootstrapCloud();
