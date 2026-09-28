@@ -42,6 +42,7 @@
   let hcePageSize = 25;
   let adminNotice = "";
   let adminSession = false;
+  let adminSessionUntil = 0;
   let adminModalSection = null;
   let cloudStatus = "checking";
   let lastSyncAt = localStorage.getItem("msr_hce_last_sync") || null;
@@ -242,7 +243,7 @@
       const localTs=Date.parse(db?.meta?.updatedAt||0)||0;
       const cloudTs=Date.parse(cloud?.meta?.updatedAt||0)||0;
       if(cloud?.version && cloudTs>localTs){
-        db=cloud;
+        db=normalizeData(cloud);
         localStorage.setItem(STORAGE_KEY,JSON.stringify(db));
         render();
         toast("☁️ Se descargó la versión más reciente");
@@ -1524,9 +1525,14 @@
   }
 
   async function openAdminCenter(section="edit"){
-    if(!adminSession){
+    const validSession=adminSession && Date.now()<adminSessionUntil;
+    if(!validSession){
+      adminSession=false;
       if(!(await adminAuth()))return;
       adminSession=true;
+      adminSessionUntil=Date.now()+(15*60*1000);
+    }else{
+      adminSessionUntil=Date.now()+(15*60*1000);
     }
     adminModalSection=section;
     renderAdminModal();
@@ -1616,14 +1622,34 @@
       </div>`;
   }
 
+  function getCloudConflict(){
+    try{return JSON.parse(localStorage.getItem(CLOUD_CONFLICT_KEY)||"null")}catch{return null}
+  }
+
+  function clearCloudConflict(){
+    localStorage.removeItem(CLOUD_CONFLICT_KEY);
+  }
+
   function adminCloudPanel(){
     const undo=(()=>{try{return JSON.parse(localStorage.getItem(ADMIN_UNDO_KEY)||"null")}catch{return null}})();
+    const conflict=getCloudConflict();
     return `
       <div class="admin-section-summary">
-        <div><b>${cloudStatus==="online"?"🟢":"🔴"}</b><span>${cloudStatus==="online"?"Nube conectada":"Revisar conexión"}</span></div>
+        <div><b>${cloudStatus==="online"?"🟢":cloudStatus==="error"?"🔴":"🟠"}</b><span>${cloudStatus==="online"?"Nube conectada":cloudStatus==="error"?"Revisar sincronización":"Comprobando nube"}</span></div>
         <div><b>🕒</b><span>Última sync: ${formatSyncTime(lastSyncAt)}</span></div>
         <div><b>↩️</b><span>${undo?new Date(undo.at).toLocaleString("es-ES"):"Sin recuperación"}</span></div>
+        <div><b>${conflict?"⚠️":"✅"}</b><span>${conflict?"Conflicto pendiente":"Sin conflictos guardados"}</span></div>
       </div>
+
+      ${conflict?`<div class="cloud-conflict-card">
+        <div><strong>⚠️ Conflicto entre dispositivos</strong><small>Detectado ${new Date(conflict.at).toLocaleString("es-ES")}. Ninguna copia se ha eliminado.</small></div>
+        <div class="cloud-conflict-actions">
+          <button class="btn ghost" id="restoreConflictLocal">💻 Conservar copia local</button>
+          <button class="btn primary" id="restoreConflictRemote">☁️ Usar copia de la nube</button>
+          <button class="btn danger-soft" id="discardConflict">Cerrar aviso</button>
+        </div>
+      </div>`:""}
+
       <div class="admin-tool-row">
         <button class="admin-tool-card" data-admin-run="pull"><span>☁️⬇️</span><strong>Nube → dispositivo</strong><small>Descargar la copia compartida</small></button>
         <button class="admin-tool-card" data-admin-run="push"><span>☁️⬆️</span><strong>Dispositivo → nube</strong><small>Forzar esta copia a todos</small></button>
@@ -1858,13 +1884,37 @@
     const hceSearch=document.querySelector("#adminHceSearchBtn");
     if(hceSearch)hceSearch.onclick=()=>renderHceAdminEditor(document.querySelector("#adminHceSearch").value);
 
+    const conflictLocal=document.querySelector("#restoreConflictLocal");
+    if(conflictLocal)conflictLocal.onclick=async()=>{
+      const conflict=getCloudConflict();if(!conflict?.local)return;
+      if(!confirm("¿Conservar la copia LOCAL y enviarla a la nube?"))return;
+      db=normalizeData(conflict.local);
+      localStorage.setItem(STORAGE_KEY,JSON.stringify(db));
+      try{if(window.MSRCloud?.enabled)await window.MSRCloud.save(db);clearCloudConflict();pendingCloudSave=false;localStorage.removeItem("msr_hce_pending_sync");markCloudOnline();toast("💻 Copia local conservada y enviada a la nube");renderAdminModal();}
+      catch(err){recordAppError(err,"conflict-local");markCloudError(err);toast("No se pudo enviar la copia local",true);}
+    };
+    const conflictRemote=document.querySelector("#restoreConflictRemote");
+    if(conflictRemote)conflictRemote.onclick=()=>{
+      const conflict=getCloudConflict();if(!conflict?.remote)return;
+      if(!confirm("¿Sustituir este dispositivo por la copia guardada de la NUBE?"))return;
+      makeAdminSnapshot("Antes de resolver conflicto usando nube");
+      db=normalizeData(conflict.remote);
+      localStorage.setItem(STORAGE_KEY,JSON.stringify(db));
+      clearCloudConflict();pendingCloudSave=false;localStorage.removeItem("msr_hce_pending_sync");markCloudOnline();toast("☁️ Copia de nube aplicada");renderAdminModal();
+    };
+    const discardConflict=document.querySelector("#discardConflict");
+    if(discardConflict)discardConflict.onclick=()=>{
+      if(!confirm("¿Cerrar el aviso de conflicto sin cambiar los datos?"))return;
+      clearCloudConflict();toast("Aviso de conflicto cerrado");renderAdminModal();
+    };
+
     const backup=document.querySelector("#adminBackupBtn");if(backup)backup.onclick=()=>download(`msr-hce-backup-${today()}.json`,JSON.stringify(db,null,2));
     const restore=document.querySelector("#adminRestoreBtn"),ri=document.querySelector("#adminRestoreInput");
     if(restore&&ri)restore.onclick=()=>ri.click();
     if(ri)ri.onchange=e=>{
       const f=e.target.files?.[0];if(!f)return;
       const rd=new FileReader();
-      rd.onload=()=>{try{const x=JSON.parse(rd.result);if(!x.version)throw 0;makeAdminSnapshot("Antes de restaurar backup");db=x;save();toast("Backup restaurado");renderAdminModal()}catch{toast("Backup no válido",true)}};
+      rd.onload=()=>{try{const x=JSON.parse(rd.result);if(!x.version)throw 0;makeAdminSnapshot("Antes de restaurar backup");db=normalizeData(x);save();toast("Backup restaurado");renderAdminModal()}catch{toast("Backup no válido",true)}};
       rd.readAsText(f);
     };
 
@@ -2113,7 +2163,7 @@
     const spick=$("#summaryPickingFilter"); if(spick)spick.onchange=()=>{summaryPickingFilter=spick.value;summaryPage=1;render()};
     const sship=$("#summaryShippingFilter"); if(sship)sship.onchange=()=>{summaryShippingFilter=sship.value;summaryPage=1;render()};
     const sserv=$("#summaryServalFilter"); if(sserv)sserv.onchange=()=>{summaryServalFilter=sserv.value;summaryPage=1;render()};
-    const stext=$("#summaryTextFilter"); if(stext)stext.oninput=()=>{summaryTextFilter=stext.value;summaryPage=1;render()};
+    const stext=$("#summaryTextFilter"); if(stext)stext.oninput=()=>{summaryTextFilter=stext.value;summaryPage=1;clearTimeout(bindPage._searchTimer);bindPage._searchTimer=setTimeout(()=>render(),280)};
     const skey=$("#summarySortKey"); if(skey)skey.onchange=()=>{summarySortKey=skey.value;summaryPage=1;render()};
     const sdir=$("#summarySortDir"); if(sdir)sdir.onchange=()=>{summarySortDir=sdir.value;summaryPage=1;render()};
     const sreset=$("#resetSummaryFilters"); if(sreset)sreset.onclick=()=>{
@@ -2327,7 +2377,7 @@
     const backup=$("#backupBtn"); if(backup)backup.onclick=()=>download(`msr-hce-backup-${today()}.json`,JSON.stringify(db,null,2));
     const restore=$("#restoreBtn"),ri=$("#restoreInput"); if(restore)restore.onclick=async()=>{if(await adminAuth())ri.click();};
     if(ri)ri.onchange=e=>{
-      const f=e.target.files[0];if(!f)return;const rd=new FileReader();rd.onload=()=>{try{const x=JSON.parse(rd.result);if(!x.version)throw 0;makeAdminSnapshot("Antes de restaurar backup");db=x;save();adminNotice="Backup restaurado correctamente.";toast("Backup restaurado");render()}catch{toast("Backup no válido",true)}};rd.readAsText(f);
+      const f=e.target.files[0];if(!f)return;const rd=new FileReader();rd.onload=()=>{try{const x=JSON.parse(rd.result);if(!x.version)throw 0;makeAdminSnapshot("Antes de restaurar backup");db=normalizeData(x);save();adminNotice="Backup restaurado correctamente.";toast("Backup restaurado");render()}catch{toast("Backup no válido",true)}};rd.readAsText(f);
     };
     const reset=$("#resetBtn");if(reset)reset.onclick=async()=>{
       if(!(await adminAuth()))return;
