@@ -428,41 +428,101 @@
     const rd=new FileReader();
     rd.onload=e=>{
       try{
-        const wb=XLSX.read(e.target.result,{type:"array",cellDates:true});
-        const ws=wb.Sheets[wb.SheetNames[0]];
-        const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:"",raw:true});
+        let rows=[];
+        const name=String(file.name||"").toLowerCase();
+
+        if(name.endsWith(".csv")){
+          const bytes=new Uint8Array(e.target.result);
+          let text="";
+          try{
+            text=new TextDecoder("windows-1252").decode(bytes);
+          }catch{
+            text=new TextDecoder("utf-8").decode(bytes);
+          }
+          const wb=XLSX.read(text,{type:"string",raw:true,FS:";"});
+          const ws=wb.Sheets[wb.SheetNames[0]];
+          rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:"",raw:true});
+        }else{
+          const wb=XLSX.read(e.target.result,{type:"array",cellDates:true});
+          const ws=wb.Sheets[wb.SheetNames[0]];
+          rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:"",raw:true});
+        }
+
         const clean=rows.filter(r=>r.some(v=>String(v).trim()!==""));
         if(clean.length<2)throw new Error("Archivo vacío");
 
-        // Los archivos MSR y HCE llegan con los títulos de columna en la primera fila.
-        // Esa primera fila se usa SOLO como cabecera y nunca se importa como registro.
+        // Primera fila = cabeceras. Nunca se importa como dato.
         const headers=clean[0].map(v=>String(v).trim());
         const data=clean.slice(1);
 
         if(kind==="msr")importMSR(headers,data); else importHCE(headers,data);
-      }catch(err){console.error(err);toast("No he podido interpretar el archivo. Revisa que sea el export correcto.",true)}
+      }catch(err){
+        console.error(err);
+        toast("No he podido interpretar el archivo. Revisa que sea el export correcto.",true)
+      }
     };
     rd.readAsArrayBuffer(file);
   }
 
   function importMSR(h,rows){
     const idx={
-      id:findHeader(h,["ID OT de reparto","ID reparto","OT reparto","id"]),
+      id:findHeader(h,["Código","Codigo","ID OT de reparto","ID reparto","OT reparto","id"]),
+      work:findHeader(h,["Orden de trabajo","Descripción","Descripcion"]),
       planDate:findHeader(h,["Fecha prevista de reparto","Fecha prevista","Fecha reparto","fecha"]),
       planTime:findHeader(h,["Hora prevista de reparto","Hora prevista","Hora reparto","hora"]),
-      desc:findHeader(h,["Descripción","Descripcion","orden de trabajo","Destino"]),
       loadOT:findHeader(h,["Nº OT de carga","N OT de carga","OT de carga","numero ot carga"]),
+      sourceStatus:findHeader(h,["Estado"]),
+      store:findHeader(h,["Tienda"]),
+      chain:findHeader(h,["Cadena"])
     };
-    if(idx.id<0)throw new Error("No encuentro ID reparto");
+    if(idx.id<0)throw new Error("No encuentro la columna Código / ID reparto");
+
+    const inferPlanFromWork=(work)=>{
+      const s=String(work||"").trim();
+      // Formatos habituales: XXXXX_BLECK_2509_15PM o XXXXX_NAME_2409_07AM
+      const m=s.match(/(?:^|_)(\d{2})(\d{2})_(\d{1,2})(AM|PM)(?:_|$)/i);
+      if(!m)return {date:"",time:""};
+      const day=m[1],month=m[2];
+      const year=String(new Date().getFullYear());
+      let hour=Number(m[3]);
+      const ap=m[4].toUpperCase();
+      if(ap==="PM" && hour<12)hour+=12;
+      if(ap==="AM" && hour===12)hour=0;
+      return {
+        date:`${year}-${month}-${day}`,
+        time:`${String(hour).padStart(2,"0")}:00`
+      };
+    };
+
     const map=new Map();
     rows.forEach(r=>{
-      const id=idNorm(pick(r,idx.id));if(!id)return;
-      const o={id,planDate:parseDate(pick(r,idx.planDate)),planTime:parseTime(pick(r,idx.planTime)),description:String(pick(r,idx.desc)).replace(/^tienda\s*/i,"").trim(),loadOT:String(pick(r,idx.loadOT)).trim()};
+      const id=idNorm(pick(r,idx.id));
+      if(!id || !/^\d+$/.test(id))return;
+
+      const work=String(pick(r,idx.work)).trim();
+      const inferred=inferPlanFromWork(work);
+      const explicitDate=parseDate(pick(r,idx.planDate));
+      const explicitTime=parseTime(pick(r,idx.planTime));
+
+      const o={
+        id,
+        planDate:explicitDate||inferred.date,
+        planTime:explicitTime||inferred.time,
+        description:work,
+        loadOT:String(pick(r,idx.loadOT)).trim(),
+        sourceStatus:String(pick(r,idx.sourceStatus)).trim(),
+        store:String(pick(r,idx.store)).trim(),
+        chain:String(pick(r,idx.chain)).trim()
+      };
       map.set(id,o);
     });
+
     db.msr=[...map.values()].sort((a,b)=>(`${a.planDate}${a.planTime}`).localeCompare(`${b.planDate}${b.planTime}`));
     db.msr.forEach(o=>stateFor(o.id));
-    db.meta.msrImportedAt=nowISO();save();toast(`${db.msr.length} órdenes MSR importadas`);go("resumen");
+    db.meta.msrImportedAt=nowISO();
+    save();
+    toast(`${db.msr.length} órdenes MSR importadas`);
+    go("resumen");
   }
 
   function importHCE(h,rows){
