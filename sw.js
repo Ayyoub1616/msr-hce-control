@@ -1,4 +1,4 @@
-const CACHE="msr-hce-v36";
+const CACHE="msr-hce-v37";
 const CORE=["./","./index.html","./styles.css","./app.js","./cloud-config.js","./cloud.js","./manifest.webmanifest","./icon-192.png","./icon-512.png"];
 
 self.addEventListener("install",event=>{
