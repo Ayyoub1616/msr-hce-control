@@ -17,6 +17,7 @@
   let deferredInstall = null;
   let stateView = { ids: [], showAll: false };
   let summaryFilter = "all";
+  let summaryDateFilter = "all";
 
   const $ = s => document.querySelector(s);
   const content = $("#content");
@@ -198,12 +199,18 @@
 
   function renderResumen(){
     let rows=orderRows();
+    const dates=[...new Set(db.msr.map(o=>o.planDate).filter(Boolean))].sort();
+    if(summaryDateFilter!=="all") rows=rows.filter(({o})=>o.planDate===summaryDateFilter);
     if(summaryFilter!=="all") rows=rows.filter(({o})=>situation(o)===summaryFilter);
     content.innerHTML=`
       <div class="panel" style="margin-top:0">
         <div class="panel-head">
-          <div><h2>Resumen MSR</h2><p>${rows.length} órdenes visibles de ${db.msr.length}.</p></div>
+          <div><h2>Resumen MSR</h2><p>${rows.length} órdenes visibles de ${db.msr.length}. El filtro no borra datos.</p></div>
           <div class="filters">
+            <select id="summaryDateFilter" class="filter-input">
+              <option value="all">Todas las fechas</option>
+              ${dates.map(d=>`<option value="${esc(d)}" ${summaryDateFilter===d?"selected":""}>${fmtDate(d)}</option>`).join("")}
+            </select>
             ${filterBtn("all","Todas")}${filterBtn("PENDIENTE","Pendientes")}${filterBtn("RETRASO","Retrasos")}${filterBtn("EXPEDIDO PARCIAL","Parciales")}${filterBtn("EXPEDIDO","Expedidas")}
           </div>
         </div>
@@ -285,7 +292,7 @@
         <div class="notice ${msr?"":"warn"}" style="margin-top:16px">
           ${msr
             ?"Las órdenes que ya tengan estado manual conservarán Total/Parcial, pallets, Serval y comentarios."
-            :"Una nueva importación HCE reemplaza la planificación anterior. El checklist de contenedores coincidentes se conserva por matrícula/ID."}
+            :"Una nueva importación HCE agrupa todas las líneas por MATRÍCULA. El checklist del mismo contenedor se conserva."}
         </div>
         <div class="preview">
           <strong>Última importación:</strong> ${when?new Date(when).toLocaleString("es-ES"):"Nunca"} ·
@@ -338,6 +345,7 @@
     document.querySelectorAll("[data-edit-id]").forEach(x=>x.onclick=()=>openState(x.dataset.editId));
     document.querySelectorAll("[data-container-key]").forEach(x=>x.onclick=()=>openContainer(x.dataset.containerKey));
     document.querySelectorAll("[data-summary-filter]").forEach(x=>x.onclick=()=>{summaryFilter=x.dataset.summaryFilter;render()});
+    const sdf=$("#summaryDateFilter"); if(sdf)sdf.onchange=()=>{summaryDateFilter=sdf.value;render()};
 
     const filter=$("#filterStates"); if(filter)filter.onclick=()=>{
       const ids=$("#idsSearch").value.split(/[\s,;|]+/).map(idNorm).filter(Boolean);
@@ -422,6 +430,26 @@
     render();
   };
 
+  function parseSemicolonCSV(text){
+    const rows=[]; let row=[], field="", quoted=false;
+    for(let i=0;i<text.length;i++){
+      const ch=text[i];
+      if(ch==='"'){
+        if(quoted && text[i+1]==='"'){field+='"';i++;}
+        else quoted=!quoted;
+      }else if(ch===';' && !quoted){
+        row.push(field);field="";
+      }else if((ch==='\n' || ch==='\r') && !quoted){
+        if(ch==='\r' && text[i+1]==='\n')i++;
+        row.push(field);field="";
+        if(row.some(v=>String(v).trim()!==""))rows.push(row);
+        row=[];
+      }else field+=ch;
+    }
+    if(field!=="" || row.length){row.push(field);if(row.some(v=>String(v).trim()!==""))rows.push(row);}
+    return rows;
+  }
+
   function handleImport(file,kind){
     if(!file)return;
     if(!window.XLSX){toast("El lector Excel aún no se ha cargado. Prueba de nuevo en unos segundos.",true);return}
@@ -434,14 +462,9 @@
         if(name.endsWith(".csv")){
           const bytes=new Uint8Array(e.target.result);
           let text="";
-          try{
-            text=new TextDecoder("windows-1252").decode(bytes);
-          }catch{
-            text=new TextDecoder("utf-8").decode(bytes);
-          }
-          const wb=XLSX.read(text,{type:"string",raw:true,FS:";"});
-          const ws=wb.Sheets[wb.SheetNames[0]];
-          rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:"",raw:true});
+          try{text=new TextDecoder("windows-1252").decode(bytes);}
+          catch{text=new TextDecoder("utf-8").decode(bytes);}
+          rows=parseSemicolonCSV(text);
         }else{
           const wb=XLSX.read(e.target.result,{type:"array",cellDates:true});
           const ws=wb.Sheets[wb.SheetNames[0]];
@@ -466,21 +489,18 @@
 
   function importMSR(h,rows){
     const idx={
-      id:findHeader(h,["Código","Codigo","ID OT de reparto","ID reparto","OT reparto","id"]),
+      id:findHeader(h,["Código","Codigo","ID OT de reparto","ID reparto","OT reparto"]),
       work:findHeader(h,["Orden de trabajo","Descripción","Descripcion"]),
-      planDate:findHeader(h,["Fecha prevista de reparto","Fecha prevista","Fecha reparto","fecha"]),
-      planTime:findHeader(h,["Hora prevista de reparto","Hora prevista","Hora reparto","hora"]),
-      loadOT:findHeader(h,["Nº OT de carga","N OT de carga","OT de carga","numero ot carga"]),
       sourceStatus:findHeader(h,["Estado"]),
       store:findHeader(h,["Tienda"]),
-      chain:findHeader(h,["Cadena"])
+      chain:findHeader(h,["Cadena"]),
+      loadOT:findHeader(h,["Nº OT de carga","N OT de carga","OT de carga","numero ot carga"])
     };
-    if(idx.id<0)throw new Error("No encuentro la columna Código / ID reparto");
+    if(idx.id<0)throw new Error("No encuentro la columna Código");
 
     const inferPlanFromWork=(work)=>{
       const s=String(work||"").trim();
-      // Formatos habituales: XXXXX_BLECK_2509_15PM o XXXXX_NAME_2409_07AM
-      const m=s.match(/(?:^|_)(\d{2})(\d{2})_(\d{1,2})(AM|PM)(?:_|$)/i);
+      const m=s.match(/_(\d{2})(\d{2})_(\d{1,2})(AM|PM)(?:_|$)/i);
       if(!m)return {date:"",time:""};
       const day=m[1],month=m[2];
       const year=String(new Date().getFullYear());
@@ -488,36 +508,35 @@
       const ap=m[4].toUpperCase();
       if(ap==="PM" && hour<12)hour+=12;
       if(ap==="AM" && hour===12)hour=0;
-      return {
-        date:`${year}-${month}-${day}`,
-        time:`${String(hour).padStart(2,"0")}:00`
-      };
+      return {date:`${year}-${month}-${day}`,time:`${String(hour).padStart(2,"0")}:00`};
     };
 
     const map=new Map();
     rows.forEach(r=>{
-      const id=idNorm(pick(r,idx.id));
-      if(!id || !/^\d+$/.test(id))return;
+      const rawId=String(pick(r,idx.id)).trim();
+      if(!rawId)return;
+      const id=idNorm(rawId);
+      if(!/^\d+$/.test(id))return;
 
       const work=String(pick(r,idx.work)).trim();
       const inferred=inferPlanFromWork(work);
-      const explicitDate=parseDate(pick(r,idx.planDate));
-      const explicitTime=parseTime(pick(r,idx.planTime));
-
-      const o={
+      map.set(id,{
         id,
-        planDate:explicitDate||inferred.date,
-        planTime:explicitTime||inferred.time,
+        planDate:inferred.date,
+        planTime:inferred.time,
         description:work,
         loadOT:String(pick(r,idx.loadOT)).trim(),
         sourceStatus:String(pick(r,idx.sourceStatus)).trim(),
         store:String(pick(r,idx.store)).trim(),
         chain:String(pick(r,idx.chain)).trim()
-      };
-      map.set(id,o);
+      });
     });
 
-    db.msr=[...map.values()].sort((a,b)=>(`${a.planDate}${a.planTime}`).localeCompare(`${b.planDate}${b.planTime}`));
+    // Se carga TODO el fichero. No se elimina ninguna orden por fecha.
+    db.msr=[...map.values()].sort((a,b)=>
+      (`${a.planDate}${a.planTime}${String(a.id).padStart(12,"0")}`)
+      .localeCompare(`${b.planDate}${b.planTime}${String(b.id).padStart(12,"0")}`)
+    );
     db.msr.forEach(o=>stateFor(o.id));
     db.meta.msrImportedAt=nowISO();
     save();
@@ -545,12 +564,12 @@
       const entryId=String(pick(r,idx.entry)).trim();
       const number=String(pick(r,idx.number)).trim();
       if(!entryId && !number)return;
-      const key=(entryId || number).toUpperCase();
+      const key=(number || entryId).toUpperCase();
       const qtyRaw=Number(pick(r,idx.qty)) || 0;
 
       if(!grouped.has(key)){
         grouped.set(key,{
-          key,number,entryId,
+          key,number,entryId,entryIds:entryId?[entryId]:[],
           taskId:String(pick(r,idx.task)).trim(),
           planDate:parseDate(pick(r,idx.planDate)),
           planTime:parseTime(pick(r,idx.planTime)),
@@ -563,6 +582,8 @@
       const g=grouped.get(key);
       g.plannedQty += qtyRaw;
       g.lines += 1;
+      if(entryId && !g.entryIds.includes(entryId))g.entryIds.push(entryId);
+      g.entryId=g.entryIds.join(", ");
       if(!g.number && number)g.number=number;
       if(!g.entryId && entryId)g.entryId=entryId;
       if(!g.planDate)g.planDate=parseDate(pick(r,idx.planDate));
