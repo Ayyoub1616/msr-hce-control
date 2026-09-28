@@ -437,46 +437,51 @@
     const plannedText=p?`${fmtDate(o.planDate)} · ${fmtTime(o.planTime)}`:"Sin previsión";
     const actualText=a?`${fmtDate(s.date)} · ${fmtTime(s.time)}`:"Sin expedición";
 
-    let cls="cmp-neutral",icon="⚪",title="SIN DATOS",delta="Sin cálculo";
+    let cls="cmp-neutral",icon="⚪",title="SIN DATOS",delta="Sin cálculo",meaning="Revisar información.";
     if(ship==="Total"){
+      meaning="Pedido completo enviado · no queda mercancía pendiente de esta ID.";
       if(a&&p){
         const diff=a-p;
-        if(diff<=0){cls="cmp-success";icon="✅";title="ENVIADO A TIEMPO";delta=`${exactDurationLabel(diff)} antes`;}
-        else{cls="cmp-complete-late";icon="🟣";title="ENVIADO CON RETRASO";delta=`${exactDurationLabel(diff)} tarde`;}
+        if(diff<=0){cls="cmp-success";icon="✅";title="TOTAL · ENVIADO A TIEMPO";delta=`${exactDurationLabel(diff)} antes del previsto`;}
+        else{cls="cmp-complete-late";icon="🟣";title="TOTAL · ENVIADO CON RETRASO";delta=`${exactDurationLabel(diff)} después del previsto`;}
       }else{
-        cls="cmp-success";icon="✅";title="ENVIADO";delta="Falta fecha/hora real";
+        cls="cmp-success";icon="✅";title="TOTAL · PEDIDO COMPLETO ENVIADO";delta="⚠️ Falta registrar fecha/hora real";
       }
     }else if(ship==="Parcial"){
+      meaning="Se ha enviado una parte del pedido · queda mercancía pendiente de esta misma ID.";
       if(a&&p){
         const diff=a-p;
         cls=diff>0?"cmp-partial-late":"cmp-partial";
-        icon="🟠";title="ENVÍO PARCIAL";delta=diff<=0?`${exactDurationLabel(diff)} antes`:`${exactDurationLabel(diff)} tarde`;
+        icon="🟠";title="PARCIAL · QUEDA RESTO PENDIENTE";
+        delta=diff<=0?`Parte enviada ${exactDurationLabel(diff)} antes del previsto`:`Parte enviada ${exactDurationLabel(diff)} después del previsto`;
       }else{
-        cls="cmp-partial";icon="🟠";title="ENVÍO PARCIAL";delta="Pendiente de completar";
+        cls="cmp-partial";icon="🟠";title="PARCIAL · QUEDA RESTO PENDIENTE";delta="⚠️ Registra fecha/hora del envío parcial";
       }
     }else if(p){
+      meaning="No consta ningún envío de esta ID.";
       const diff=new Date()-p;
-      if(diff>0){cls="cmp-danger";icon="🔴";title="NO ENVIADO · RETRASO";delta=`${exactDurationLabel(diff)} fuera de plazo`;}
-      else{cls="cmp-info";icon="🔵";title="NO ENVIADO · EN PLAZO";delta=`Faltan ${exactDurationLabel(diff)}`;}
+      if(diff>0){cls="cmp-danger";icon="🔴";title="NO ENVIADO · FUERA DE PLAZO";delta=`${exactDurationLabel(diff)} de retraso`;}
+      else{cls="cmp-info";icon="🔵";title="NO ENVIADO · TODAVÍA EN PLAZO";delta=`Faltan ${exactDurationLabel(diff)} para la hora prevista`;}
     }else{
-      cls="cmp-neutral";icon="⚪";title="NO ENVIADO";delta="Sin previsión";
+      cls="cmp-neutral";icon="⚪";title="NO ENVIADO";delta="No se puede calcular el cumplimiento";meaning="Falta fecha/hora prevista.";
     }
 
     return `<div class="compliance-card ${cls}">
       <div class="compliance-main"><span class="compliance-icon">${icon}</span><strong>${title}</strong></div>
       <div class="compliance-delta">${esc(delta)}</div>
+      <div class="compliance-meaning">${esc(meaning)}</div>
       <div class="compliance-meta">
-        <span>📅 Prev: ${esc(plannedText)}</span>
-        <span>🚚 Real: ${esc(actualText)}</span>
+        <span>📅 Previsto: ${esc(plannedText)}</span>
+        <span>🚚 Expedición: ${esc(actualText)}</span>
       </div>
     </div>`;
   }
 
   function msrShippingBadge(value){
     const v=value||"No";
-    if(v==="Total")return '<span class="status-chip ship-total">✅ Total</span>';
-    if(v==="Parcial")return '<span class="status-chip ship-partial">🟠 Parcial</span>';
-    return '<span class="status-chip ship-no">⏳ No enviado</span>';
+    if(v==="Total")return '<span class="status-chip ship-total" title="Pedido completo enviado">✅ Total · completo</span>';
+    if(v==="Parcial")return '<span class="status-chip ship-partial" title="Parte enviada; queda resto pendiente">🟠 Parcial · queda resto</span>';
+    return '<span class="status-chip ship-no" title="No consta ningún envío">⏳ No enviado</span>';
   }
 
   function servalBadge(value){
@@ -731,9 +736,9 @@
         </div>
 
         <div class="status-legend">
-          <span class="legend success">🟢 Enviado a tiempo</span>
+          <span class="legend success">🟢 Total enviado a tiempo</span>
           <span class="legend purple">🟣 Enviado con retraso</span>
-          <span class="legend warning">🟠 Envío parcial</span>
+          <span class="legend warning">🟠 Parcial · queda resto pendiente</span>
           <span class="legend danger">🔴 No enviado y retrasado</span>
           <span class="legend info">🔵 No enviado, aún en plazo</span>
           <span class="legend serval">🚨 Serval</span>
@@ -782,7 +787,7 @@
               <td><strong>${esc(x.number||x.entryId)}</strong></td>
               <td>${fmtDate(x.planDate)} · ${fmtTime(x.planTime)}</td>
               <td>${x.realDate?`${fmtDate(x.realDate)} · ${fmtTime(x.realTime)}`:"—"}</td>
-              <td>${badge(x.process||"Pendiente de recibir")}</td>
+              <td>${hceProcessBadge(x.process||"Pendiente de recibir")}</td>
             </tr>`).join(""):`<tr><td colspan="5" class="empty">No hay contenedores HCE en este periodo.</td></tr>`}</tbody>
           </table>
         </div>
@@ -813,6 +818,25 @@
 
   function orderRows(){
     return db.msr.map(o=>({o,s:stateFor(o.id)}));
+  }
+
+  function shippingOptions(current){
+    const items=[
+      ["No","⏳ No enviado · todavía no ha salido mercancía"],
+      ["Parcial","🟠 Parcial · se ha enviado una parte; queda resto pendiente"],
+      ["Total","✅ Total · pedido completo enviado"]
+    ];
+    return items.map(([v,label])=>`<option value="${v}" ${current===v?"selected":""}>${label}</option>`).join("");
+  }
+
+  function hceProcessOptions(current){
+    const items=[
+      ["Pendiente de recibir","⏳ Pendiente de recibir · todavía no ha llegado"],
+      ["Posicionado","📍 Posicionado · ya llegó y está ubicado"],
+      ["Descargando","🔄 Descargando · descarga en curso"],
+      ["Descargado","✅ Descargado · descarga finalizada"]
+    ];
+    return items.map(([v,label])=>`<option value="${v}" ${current===v?"selected":""}>${label}</option>`).join("");
   }
 
   function msrOptions(current, options){
@@ -859,7 +883,7 @@
       <td><strong>${esc(o.id)}</strong></td>
       <td class="wrap msr-description">${esc(o.description||"")}</td>
       <td>${esc(o.store||"")}</td>
-      <td><select class="msr-edit msr-select ${stateSelectClass("shipping",s.shipping||"No")}" data-msr-id="${esc(o.id)}" data-msr-field="shipping">${msrOptions(s.shipping||"No",["No","Parcial","Total"])}</select></td>
+      <td><select class="msr-edit msr-select ${stateSelectClass("shipping",s.shipping||"No")}" data-msr-id="${esc(o.id)}" data-msr-field="shipping">${shippingOptions(s.shipping||"No")}</select></td>
       <td><input class="msr-edit msr-date" type="date" data-msr-id="${esc(o.id)}" data-msr-field="date" value="${esc(s.date||"")}"></td>
       <td><input class="msr-edit msr-time" type="time" data-msr-id="${esc(o.id)}" data-msr-field="time" value="${esc(s.time||"")}"></td>
       <td><select class="msr-edit msr-select-short ${stateSelectClass("serval",s.serval||"No")} ${s.serval==="Si"?"serval-field":""}" data-msr-id="${esc(o.id)}" data-msr-field="serval">${msrOptions(s.serval||"No",["No","Si"])}</select></td>
@@ -1013,6 +1037,15 @@
             <button class="btn danger-soft" id="clearMSRBtn">🧹 Limpiar MSR</button>
           </div>
         </div>
+        <div class="operational-help msr-help">
+          <div class="help-title">🚚 ¿Qué significa Envío?</div>
+          <div class="help-items">
+            <span class="help-item neutral"><b>⏳ No enviado</b><small>No ha salido mercancía de esta ID.</small></span>
+            <span class="help-item partial"><b>🟠 Parcial</b><small>Ha salido una parte; queda resto pendiente.</small></span>
+            <span class="help-item total"><b>✅ Total</b><small>Pedido completo enviado; no queda resto.</small></span>
+            <span class="help-item serval"><b>🚨 Serval</b><small>Incidencia especial; comentario obligatorio.</small></span>
+          </div>
+        </div>
         <div class="memory-note">
           <strong>💾 Memoria de estados activa</strong>
           <span>Al limpiar MSR se borran solo las órdenes visibles. Los estados de cada Código se conservan y se recuperan si esa ID vuelve a aparecer en una importación futura.</span>
@@ -1074,6 +1107,14 @@
   function filterBtn(key,label){return `<button class="btn ${summaryFilter===key?"primary":"ghost"}" data-summary-filter="${esc(key)}">${label}</button>`}
 
 
+  function hceProcessBadge(value){
+    const v=value||"Pendiente de recibir";
+    if(v==="Descargado")return '<span class="status-chip hce-done">✅ Descargado</span>';
+    if(v==="Descargando")return '<span class="status-chip hce-downloading">🔄 Descargando</span>';
+    if(v==="Posicionado")return '<span class="status-chip hce-positioned">📍 Posicionado</span>';
+    return '<span class="status-chip hce-pending">⏳ Pendiente</span>';
+  }
+
   function hceTiming(c){
     const p=dt(c.planDate,c.planTime);
     if(!p)return {label:"⚪ SIN PREVISIÓN",hours:null,kind:"gray",state:"unknown",level:0,detail:"No hay fecha/hora prevista"};
@@ -1103,13 +1144,13 @@
     const info=hceTiming(c);
     const cls=info.kind==="green"?"hce-cmp-green":info.kind==="blue"?"hce-cmp-blue":info.kind==="red"?`hce-cmp-red-${info.level||1}`:"hce-cmp-gray";
     const subtitle=info.state==="arrived-late"
-      ? "Llegada registrada fuera de plazo"
+      ? "Llegada registrada · llegó después de la hora prevista"
       :info.state==="missing-late"
-      ? "Sin llegada registrada y fuera de plazo"
+      ? "Todavía no ha llegado · el retraso sigue aumentando"
       :info.state==="arrived-ontime"
-      ? "Llegada registrada dentro de plazo"
+      ? "Llegada registrada · cumplimiento correcto"
       :info.state==="missing-ontime"
-      ? "Pendiente de llegada, todavía dentro de plazo"
+      ? "Todavía no ha llegado · aún está dentro del plazo"
       :"Sin cálculo";
     return `<div class="hce-compliance ${cls}">
       <strong>${esc(info.label)}</strong>
@@ -1162,6 +1203,15 @@
             <button class="btn danger-soft" id="clearHCEBtn">🧹 Limpiar HCE</button>
           </div>
         </div>
+        <div class="operational-help hce-help">
+          <div class="help-title">🚛 ¿Qué significa el estado HCE?</div>
+          <div class="help-items">
+            <span class="help-item neutral"><b>⏳ Pendiente</b><small>Todavía no ha llegado.</small></span>
+            <span class="help-item info"><b>📍 Posicionado</b><small>Ya llegó y está ubicado.</small></span>
+            <span class="help-item purple"><b>🔄 Descargando</b><small>Descarga en curso.</small></span>
+            <span class="help-item total"><b>✅ Descargado</b><small>Descarga finalizada.</small></span>
+          </div>
+        </div>
         <div class="simple-filter-grid hce-simple-filters">
           <label>Desde<input id="hceDateFrom" class="filter-input" type="date" value="${esc(hceDateFrom)}"></label>
           <label>Hasta<input id="hceDateTo" class="filter-input" type="date" value="${esc(hceDateTo)}"></label>
@@ -1184,7 +1234,7 @@
         <td>${fmtTime(x.planTime)}</td>
         <td><input class="hce-edit hce-date" type="date" data-hce-key="${esc(x.key)}" data-hce-field="realDate" value="${esc(x.realDate||"")}"></td>
         <td><input class="hce-edit hce-time" type="time" data-hce-key="${esc(x.key)}" data-hce-field="realTime" value="${esc(x.realTime||"")}"></td>
-        <td><select class="hce-edit hce-select ${stateSelectClass("hce",x.process||"Pendiente de recibir")}" data-hce-key="${esc(x.key)}" data-hce-field="process">${msrOptions(x.process||"Pendiente de recibir",["Pendiente de recibir","Posicionado","Descargando","Descargado"])}</select></td>
+        <td><select class="hce-edit hce-select ${stateSelectClass("hce",x.process||"Pendiente de recibir")}" data-hce-key="${esc(x.key)}" data-hce-field="process">${hceProcessOptions(x.process||"Pendiente de recibir")}</select></td>
       </tr>`).join("")}</tbody></table>`;
   }
 
@@ -1576,7 +1626,7 @@
         <label>Hora prevista<input id="aePlanTime" type="time" value="${esc(o.planTime||"")}"></label>
         <label>Estado importado<input id="aeSourceStatus" value="${esc(o.sourceStatus||"")}"></label>
         <label>Cadena<input id="aeChain" value="${esc(o.chain||"")}"></label>
-        <label>Envío<select id="aeShipping">${msrOptions(s.shipping||"No",["No","Parcial","Total"])}</select></label>
+        <label>Envío<select id="aeShipping">${shippingOptions(s.shipping||"No")}</select></label>
         <label>Fecha expedición<input id="aeDate" type="date" value="${esc(s.date||"")}"></label>
         <label>Hora expedición<input id="aeTime" type="time" value="${esc(s.time||"")}"></label>
         <label>Serval<select id="aeServal">${msrOptions(s.serval||"No",["No","Si"])}</select></label>
@@ -1619,7 +1669,7 @@
         <label>Hora prevista<input id="ahPlanTime" type="time" value="${esc(x.planTime||"")}"></label>
         <label>Fecha llegada<input id="ahRealDate" type="date" value="${esc(x.realDate||"")}"></label>
         <label>Hora llegada<input id="ahRealTime" type="time" value="${esc(x.realTime||"")}"></label>
-        <label>Estado<select id="ahProcess">${msrOptions(x.process||"Pendiente de recibir",["Pendiente de recibir","Posicionado","Descargando","Descargado"])}</select></label>
+        <label>Estado<select id="ahProcess">${hceProcessOptions(x.process||"Pendiente de recibir")}</select></label>
         <label>Transportista<input id="ahTransporter" value="${esc(x.transporter||"")}"></label>
         <label class="wide">Razón / descripción<input id="ahReason" value="${esc(x.reason||"")}"></label>
       </div>
