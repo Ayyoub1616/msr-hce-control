@@ -837,7 +837,21 @@
       }else{
         await window.MSRCloud.save(db);
       }
-    }catch(err){console.warn("Cloud load",err);toast("Nube no disponible: usando copia local",true);}
+
+      window.MSRCloud.subscribe(next=>{
+        if(!next || !next.version)return;
+        const incoming=JSON.stringify(next);
+        const current=JSON.stringify(db);
+        if(incoming===current)return;
+        db=next;
+        localStorage.setItem(STORAGE_KEY,incoming);
+        render();
+        toast("Cambios recibidos en directo");
+      });
+    }catch(err){
+      console.warn("Cloud load",err);
+      toast("Nube no disponible: usando copia local",true);
+    }
   }
 
   const initial=location.hash.replace("#",""); go(pages[initial]?initial:"inicio");
