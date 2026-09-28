@@ -73,3 +73,14 @@ body.capture-mode .report-card{box-shadow:none;border:0}
   #app{display:block}.content{padding:0;max-width:none}.report-card{border:0;box-shadow:none;padding:0}
   .report-table{max-height:none;overflow:visible}.data-table{font-size:10px}
 }
+
+/* Simplified operational layout */
+.simple-filter-grid{display:grid;grid-template-columns:repeat(6,minmax(135px,1fr));gap:10px;margin:12px 0 16px}
+.simple-filter-grid label{font-size:11px;font-weight:800;color:#475569;text-transform:uppercase;letter-spacing:.03em}
+.simple-filter-grid .filter-input{display:block;width:100%;margin-top:5px;min-width:0}
+.msr-description{min-width:280px;max-width:430px}
+.simple-hce .hce-select{min-width:155px}
+.serval-alert{background:#fff1f2!important}
+.serval-field{border-color:#ef4444!important;background:#fff1f2!important;color:#991b1b!important;font-weight:800}
+@media(max-width:1100px){.simple-filter-grid{grid-template-columns:repeat(3,minmax(140px,1fr))}}
+@media(max-width:760px){.simple-filter-grid{grid-template-columns:1fr 1fr}.msr-description{min-width:220px}}
