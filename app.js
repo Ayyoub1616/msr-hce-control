@@ -131,9 +131,9 @@
   function msrTimeBadge(o,s){
     const t=timing(o,s);
     let cls="b-gray";
-    if(t.startsWith("A TIEMPO"))cls="b-green";
-    else if(t.startsWith("TARDE")||t.startsWith("RETRASO"))cls="b-red";
-    else if(t.startsWith("FALTAN"))cls="b-blue";
+    if(t.includes("A TIEMPO"))cls="b-green";
+    else if(t.includes("TARDE")||t.includes("RETRASO"))cls="b-red";
+    else if(t.includes("FALTAN"))cls="b-blue";
     return `<span class="badge ${cls}">${esc(t)}</span>`;
   }
 
@@ -859,6 +859,27 @@
         render();
       });
     });
+    const fileInput=$("#fileInput");
+    const dropZone=$("#dropZone");
+    const importKind=page==="import-msr"?"msr":page==="import-hce"?"hce":null;
+
+    if(fileInput&&importKind){
+      fileInput.onchange=e=>{
+        const file=e.target.files?.[0];
+        if(file)handleImport(file,importKind);
+      };
+    }
+    if(dropZone&&importKind){
+      dropZone.ondragover=e=>{e.preventDefault();dropZone.classList.add("drag");};
+      dropZone.ondragleave=()=>dropZone.classList.remove("drag");
+      dropZone.ondrop=e=>{
+        e.preventDefault();
+        dropZone.classList.remove("drag");
+        const file=e.dataTransfer?.files?.[0];
+        if(file)handleImport(file,importKind);
+      };
+    }
+
     document.querySelectorAll("[data-admin-action]").forEach(btn=>btn.onclick=()=>runAdminAction(btn.dataset.adminAction));
     const backup=$("#backupBtn"); if(backup)backup.onclick=()=>download(`msr-hce-backup-${today()}.json`,JSON.stringify(db,null,2));
     const restore=$("#restoreBtn"),ri=$("#restoreInput"); if(restore)restore.onclick=()=>ri.click();
@@ -1089,7 +1110,7 @@
       });
     }catch(err){
       console.warn("Cloud load",err);
-      toast("Nube no disponible: usando copia local",true);
+      setTimeout(()=>toast("Nube temporalmente no disponible · la app sigue funcionando en local",true),300);
     }
   }
 
