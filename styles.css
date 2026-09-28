@@ -947,3 +947,119 @@ body.capture-mode .employee-popup-overlay{display:none!important}
   .operational-help{display:none!important}
   .compliance-meaning{font-size:6px!important;padding:2px 3px!important}
 }
+
+/* PDF-only operational report v37 */
+.print-only{display:none}
+.pdf-main-btn{
+  background:linear-gradient(135deg,#4f46e5,#7c3aed)!important;
+  color:#fff!important;border:1px solid #6d28d9!important;
+  box-shadow:0 7px 18px rgba(109,40,217,.18)
+}
+.pdf-main-btn:hover{filter:brightness(.98);box-shadow:0 9px 22px rgba(109,40,217,.22)}
+.issue-item span strong,.issue-item span small{display:block}
+.issue-item span strong{font-size:11px;color:#0f172a}
+.issue-item span small{font-size:10px;color:#64748b;margin-top:3px;line-height:1.35}
+.issue-item.error span small{color:#991b1b}
+.issue-item.warning span small{color:#92400e}
+.shift-summary{
+  display:grid;grid-template-columns:42px minmax(0,1fr);gap:10px;align-items:start;
+  margin:0 0 12px;padding:12px 14px;border:1px solid #c7d2fe;border-radius:14px;
+  background:linear-gradient(135deg,#eef2ff,#f8fafc)
+}
+.shift-summary-icon{width:38px;height:38px;border-radius:12px;display:grid;place-items:center;background:#fff;font-size:20px;border:1px solid #dbeafe}
+.shift-summary strong{font-size:12px;color:#1e3a8a}
+.shift-summary p{margin:4px 0 3px;font-size:11px;line-height:1.4;color:#334155}
+.shift-summary small{font-size:10px;color:#64748b}
+.pdf-section{min-width:0}
+.pdf-msr-section,.pdf-hce-section{margin-top:8px}
+
+@media print{
+  @page{size:A4 landscape;margin:7mm}
+  html,body{background:#fff!important}
+  body{font-size:8px!important}
+  #sidebar,.sidebar,.topbar,.sync-banner,.app-update-banner,.dashboard-toolbar,.toast,
+  .employee-popup-overlay,.problems-modal-overlay,.admin-modal-overlay,.manual-entry-overlay,
+  .import-preview-overlay,.no-print{display:none!important}
+  .main{display:block!important}
+  .content{padding:0!important;max-width:none!important}
+  #operationalReport{
+    border:0!important;box-shadow:none!important;border-radius:0!important;
+    margin:0!important;padding:0!important;background:#fff!important
+  }
+  .print-only{display:flex!important}
+  .pdf-cover-title{
+    align-items:center;gap:10px;padding:10px 12px;margin-bottom:8px;
+    border:1px solid #dbeafe;border-radius:10px;background:linear-gradient(135deg,#eff6ff,#f8fafc)
+  }
+  .pdf-cover-mark{font-size:22px}
+  .pdf-cover-title strong,.pdf-cover-title span{display:block}
+  .pdf-cover-title strong{font-size:14px;letter-spacing:.02em;color:#0f172a}
+  .pdf-cover-title span{font-size:8px;color:#64748b;margin-top:2px}
+  .report-head{margin:0 0 7px!important;padding:8px 10px!important;border-radius:9px!important}
+  .report-head h2{font-size:12px!important}
+  .report-sub,.report-updated{font-size:7px!important}
+  .report-alerts{margin:0 0 7px!important;padding:7px 9px!important;border-radius:8px!important}
+  .report-alerts strong{font-size:8px!important;margin-bottom:4px!important}
+  .report-alerts span{font-size:6.5px!important;padding:2px 4px!important}
+  .shift-summary{padding:8px 9px!important;margin:0 0 7px!important;grid-template-columns:30px minmax(0,1fr)!important}
+  .shift-summary-icon{width:28px!important;height:28px!important;font-size:15px!important}
+  .shift-summary strong{font-size:8px!important}
+  .shift-summary p{font-size:7px!important;margin:2px 0!important}
+  .shift-summary small{font-size:6.5px!important}
+  .status-legend{gap:3px!important;padding:2px 0 5px!important}
+  .legend{font-size:6.5px!important;padding:2px 4px!important}
+
+  .pdf-section{page-break-before:always;break-before:page}
+  .pdf-msr-section{page-break-before:always;break-before:page}
+  .pdf-hce-section{page-break-before:always;break-before:page}
+  .pdf-section .section-title{
+    font-size:11px!important;font-weight:900!important;
+    padding:5px 7px!important;margin:0 0 5px!important;
+    border-radius:7px;background:#f1f5f9;border:1px solid #e2e8f0
+  }
+  .visual-kpis{
+    display:grid!important;grid-template-columns:repeat(6,1fr)!important;
+    gap:4px!important;margin:0 0 5px!important
+  }
+  .visual-kpis .kpi{padding:5px 6px!important;border-radius:7px!important;min-height:0!important}
+  .visual-kpis .kpi small{font-size:6.5px!important}
+  .visual-kpis .kpi strong{font-size:13px!important}
+  .visual-kpis .kpi .hint{font-size:6px!important}
+  .report-table{max-height:none!important;overflow:visible!important;border:0!important}
+  .report-data-table{
+    width:100%!important;min-width:0!important;table-layout:fixed!important;
+    border-collapse:collapse!important;font-size:6.5px!important
+  }
+  .report-data-table thead{display:table-header-group}
+  .report-data-table th{
+    background:#e2e8f0!important;color:#334155!important;
+    font-size:6.5px!important;padding:4px 3px!important;border:1px solid #cbd5e1!important
+  }
+  .report-data-table td{
+    font-size:6.5px!important;padding:3px!important;
+    border:1px solid #e2e8f0!important;vertical-align:top!important
+  }
+  .report-data-table tr{break-inside:avoid;page-break-inside:avoid}
+  .compliance-card,.hce-compliance{padding:3px 4px!important;border-radius:5px!important;min-width:0!important}
+  .compliance-main strong,.compliance-delta,.compliance-meaning,.compliance-meta,
+  .hce-compliance strong,.hce-compliance span,.hce-compliance small{
+    font-size:5.8px!important;line-height:1.18!important
+  }
+  .compliance-meaning{padding:2px 3px!important;margin-top:2px!important}
+  .status-chip{font-size:5.8px!important;padding:2px 3px!important}
+  .report-footer{font-size:6px!important;margin-top:5px!important;padding-top:4px!important}
+
+  .pdf-msr-section .report-data-table th:nth-child(1){width:23%!important}
+  .pdf-msr-section .report-data-table th:nth-child(2){width:6%!important}
+  .pdf-msr-section .report-data-table th:nth-child(3){width:18%!important}
+  .pdf-msr-section .report-data-table th:nth-child(4){width:13%!important}
+  .pdf-msr-section .report-data-table th:nth-child(5){width:10%!important}
+  .pdf-msr-section .report-data-table th:nth-child(6){width:12%!important}
+  .pdf-msr-section .report-data-table th:nth-child(7){width:7%!important}
+  .pdf-msr-section .report-data-table th:nth-child(8){width:11%!important}
+  .pdf-hce-section .report-data-table th:nth-child(1){width:31%!important}
+  .pdf-hce-section .report-data-table th:nth-child(2){width:18%!important}
+  .pdf-hce-section .report-data-table th:nth-child(3){width:17%!important}
+  .pdf-hce-section .report-data-table th:nth-child(4){width:17%!important}
+  .pdf-hce-section .report-data-table th:nth-child(5){width:17%!important}
+}
