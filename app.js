@@ -264,16 +264,37 @@
     content.innerHTML=`
       <div class="panel" style="margin-top:0">
         <div class="panel-head">
-          <div><h2>Contenedores HCE</h2><p>Fecha real solo acepta fecha; hora real solo acepta hora.</p></div>
+          <div><h2>Contenedores HCE</h2><p>Rellena directamente cada fila. Los cambios se guardan automáticamente.</p></div>
           <div class="actions"><button class="btn danger" id="clearHCEBtn">🧹 Borrar HCE / nueva actualización</button></div>
         </div>
         <div class="table-wrap">${tableHCE(rows)}</div>
       </div>`;
   }
+  function hceOptions(current, options){
+    return options.map(v=>`<option value="${esc(v)}" ${current===v?"selected":""}>${esc(v)}</option>`).join("");
+  }
+
   function tableHCE(rows){
     if(!rows.length)return `<div class="empty">No hay planificación HCE importada.</div>`;
-    return `<table class="data-table"><thead><tr><th>Estado</th><th>Contenedor</th><th>ID entrada</th><th>Fecha prev.</th><th>Hora</th><th>Cantidad plan.</th><th>Transportista</th><th>Fecha real</th><th>Hora real</th><th>Proceso</th><th>Muelle</th><th>Matriculado</th><th>Ubicado</th><th>5%</th><th>Muestra</th><th>Comentario</th></tr></thead>
-      <tbody>${rows.map((c,i)=>`<tr class="clickable" data-container-key="${esc(c.key)}"><td>${badge(containerStatus(c))}</td><td><strong>${esc(c.number)}</strong></td><td>${esc(c.entryId)}</td><td>${fmtDate(c.planDate)}</td><td>${fmtTime(c.planTime)}</td><td>${esc(c.plannedQty||0)}</td><td class="wrap">${esc(c.transporter||"")}</td><td>${fmtDate(c.realDate)}</td><td>${fmtTime(c.realTime)}</td><td>${badge(c.process)}</td><td>${esc(c.dock)}</td><td>${badge(c.registered)}</td><td>${badge(c.located)}</td><td>${badge(c.five)}</td><td>${esc(c.sample)}</td><td class="wrap">${esc(c.comment)}</td></tr>`).join("")}</tbody></table>`;
+    return `<table class="data-table hce-table"><thead><tr><th>Estado</th><th>Contenedor</th><th>ID entrada</th><th>Fecha prev.</th><th>Hora</th><th>Cantidad plan.</th><th>Transportista</th><th>Fecha real</th><th>Hora real</th><th>Proceso</th><th>Muelle</th><th>Matriculado</th><th>Ubicado</th><th>5%</th><th>Muestra</th><th>Comentario</th></tr></thead>
+      <tbody>${rows.map(c=>`<tr>
+        <td class="hce-status">${badge(containerStatus(c))}</td>
+        <td><strong>${esc(c.number)}</strong></td>
+        <td class="wrap">${esc(c.entryId)}</td>
+        <td>${fmtDate(c.planDate)}</td>
+        <td>${fmtTime(c.planTime)}</td>
+        <td>${esc(c.plannedQty||0)}</td>
+        <td class="wrap">${esc(c.transporter||"")}</td>
+        <td><input class="hce-edit hce-date" type="date" data-hce-key="${esc(c.key)}" data-hce-field="realDate" value="${esc(c.realDate||"")}"></td>
+        <td><input class="hce-edit hce-time" type="time" data-hce-key="${esc(c.key)}" data-hce-field="realTime" value="${esc(c.realTime||"")}"></td>
+        <td><select class="hce-edit hce-select" data-hce-key="${esc(c.key)}" data-hce-field="process">${hceOptions(c.process||"Pendiente de recibir",["Pendiente de recibir","Posicionado","Descargando","Descargado"])}</select></td>
+        <td><input class="hce-edit hce-dock" type="text" data-hce-key="${esc(c.key)}" data-hce-field="dock" value="${esc(c.dock||"")}" placeholder="Muelle"></td>
+        <td><select class="hce-edit hce-select" data-hce-key="${esc(c.key)}" data-hce-field="registered">${hceOptions(c.registered||"No",["No","Si"])}</select></td>
+        <td><select class="hce-edit hce-select" data-hce-key="${esc(c.key)}" data-hce-field="located">${hceOptions(c.located||"No",["No","En proceso","Si"])}</select></td>
+        <td><select class="hce-edit hce-select" data-hce-key="${esc(c.key)}" data-hce-field="five">${hceOptions(c.five||"No",["No","En proceso","Si"])}</select></td>
+        <td><select class="hce-edit hce-sample" data-hce-key="${esc(c.key)}" data-hce-field="sample">${hceOptions(c.sample||"Pendiente de sacar",["Pendiente de sacar","No solicitada","Sacada"])}</select></td>
+        <td><textarea class="hce-edit hce-comment" rows="2" data-hce-key="${esc(c.key)}" data-hce-field="comment" placeholder="Comentario">${esc(c.comment||"")}</textarea></td>
+      </tr>`).join("")}</tbody></table>`;
   }
 
   function renderImport(kind){
@@ -343,9 +364,28 @@
   function bindPage(){
     document.querySelectorAll("[data-go]").forEach(x=>x.onclick=()=>go(x.dataset.go));
     document.querySelectorAll("[data-edit-id]").forEach(x=>x.onclick=()=>openState(x.dataset.editId));
-    document.querySelectorAll("[data-container-key]").forEach(x=>x.onclick=()=>openContainer(x.dataset.containerKey));
     document.querySelectorAll("[data-summary-filter]").forEach(x=>x.onclick=()=>{summaryFilter=x.dataset.summaryFilter;render()});
     const sdf=$("#summaryDateFilter"); if(sdf)sdf.onchange=()=>{summaryDateFilter=sdf.value;render()};
+    document.querySelectorAll("[data-hce-key][data-hce-field]").forEach(el=>{
+      el.addEventListener("change",()=>{
+        const key=el.dataset.hceKey, field=el.dataset.hceField;
+        const item=db.hce.find(x=>x.key===key);
+        if(!item)return;
+        item[field]=el.value;
+        item.updatedAt=nowISO();
+        save();
+
+        if(field==="process" && el.value==="Descargado"){
+          alert("DESCARGADO: introduce la cantidad REAL en HCE y dale salida.");
+        }
+        if(field==="registered" && el.value==="Si"){
+          alert("MATRICULADO: en X, FINALIZA y después CIERRA la orden de descarga.");
+        }
+
+        toast("HCE guardado");
+        if(field==="process" || field==="realDate" || field==="realTime")render();
+      });
+    });
 
     const filter=$("#filterStates"); if(filter)filter.onclick=()=>{
       const ids=$("#idsSearch").value.split(/[\s,;|]+/).map(idNorm).filter(Boolean);
