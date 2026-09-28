@@ -45,12 +45,31 @@
   const $ = s => document.querySelector(s);
   const content = $("#content");
 
+  function normalizeData(x){
+    const base=defaultData();
+    if(!x||typeof x!=="object")return base;
+    return {
+      ...base,
+      ...x,
+      msr:Array.isArray(x.msr)?x.msr:[],
+      states:x.states&&typeof x.states==="object"?x.states:{},
+      hce:Array.isArray(x.hce)?x.hce:[],
+      meta:{...base.meta,...(x.meta||{})}
+    };
+  }
+
   function load() {
     try {
-      const x = JSON.parse(localStorage.getItem(STORAGE_KEY));
-      return x && x.version ? x : defaultData();
+      const x=JSON.parse(localStorage.getItem(STORAGE_KEY));
+      return x&&x.version?normalizeData(x):defaultData();
     } catch { return defaultData(); }
   }
+  function saveLocalOnly(){
+    db.meta.updatedAt=new Date().toISOString();
+    localStorage.setItem(STORAGE_KEY,JSON.stringify(db));
+    window.dispatchEvent(new CustomEvent("msr-data-changed"));
+  }
+
   function save() {
     db.meta.updatedAt = new Date().toISOString();
     localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
@@ -65,6 +84,53 @@
       renderSyncStatus();
     }
   }
+  let waitingServiceWorker=null;
+  let reloadingForUpdate=false;
+
+  function showAppUpdate(worker){
+    waitingServiceWorker=worker||waitingServiceWorker;
+    const banner=$("#appUpdateBanner");
+    if(banner)banner.hidden=false;
+  }
+
+  function hideAppUpdate(){
+    const banner=$("#appUpdateBanner");
+    if(banner)banner.hidden=true;
+  }
+
+  function applyAppUpdate(){
+    if(!waitingServiceWorker){
+      toast("Buscando actualización…");
+      navigator.serviceWorker?.getRegistration()?.then(reg=>reg?.update());
+      return;
+    }
+    const btn=$("#applyUpdateBtn");
+    if(btn){btn.disabled=true;btn.textContent="⏳ Actualizando…";}
+    waitingServiceWorker.postMessage({type:"SKIP_WAITING"});
+  }
+
+  function wireServiceWorkerUpdates(reg){
+    if(reg.waiting && navigator.serviceWorker.controller)showAppUpdate(reg.waiting);
+
+    reg.addEventListener("updatefound",()=>{
+      const worker=reg.installing;
+      if(!worker)return;
+      worker.addEventListener("statechange",()=>{
+        if(worker.state==="installed" && navigator.serviceWorker.controller){
+          showAppUpdate(worker);
+        }
+      });
+    });
+
+    navigator.serviceWorker.addEventListener("controllerchange",()=>{
+      if(reloadingForUpdate)return;
+      reloadingForUpdate=true;
+      location.reload();
+    });
+
+    setInterval(()=>reg.update().catch(()=>{}),5*60*1000);
+  }
+
   function formatSyncTime(v){
     if(!v)return "Nunca";
     try{return new Date(v).toLocaleString("es-ES")}catch{return String(v)}
@@ -1301,7 +1367,12 @@
     if(nuclear)nuclear.onclick=async()=>{
       if(!confirm("¿Borrar TODOS los datos?"))return;
       if(!confirm("CONFIRMACIÓN FINAL: MSR, HCE, memorias y nube. ¿Continuar?"))return;
-      makeAdminSnapshot("Antes del borrado total");db=defaultData();save();if(window.MSRCloud?.enabled)window.MSRCloud.clear().catch(console.warn);toast("Datos eliminados");renderAdminModal();
+      makeAdminSnapshot("Antes del borrado total");
+      db=defaultData();
+      saveLocalOnly();
+      try{if(window.MSRCloud?.enabled)await window.MSRCloud.clear();}catch(err){console.warn("Cloud clear",err);markCloudError(err);}
+      toast("Datos eliminados");
+      renderAdminModal();
     };
   }
 
@@ -1683,7 +1754,13 @@
       if(!(await adminAuth()))return;
       if(!confirm("¿Borrar TODOS los datos de MSR, estados y HCE?"))return;
       if(!confirm("Confirmación FINAL: también se eliminará la memoria histórica y la nube. ¿Continuar?"))return;
-      makeAdminSnapshot("Antes del borrado total");db=defaultData();save();if(window.MSRCloud?.enabled)window.MSRCloud.clear().catch(console.warn);adminNotice="Se ejecutó un borrado total.";toast("Datos eliminados");render();
+      makeAdminSnapshot("Antes del borrado total");
+      db=defaultData();
+      saveLocalOnly();
+      try{if(window.MSRCloud?.enabled)await window.MSRCloud.clear();}catch(err){console.warn("Cloud clear",err);markCloudError(err);}
+      adminNotice="Se ejecutó un borrado total.";
+      toast("Datos eliminados");
+      render();
     };
   }
 
@@ -1884,7 +1961,13 @@
     if(e.key==="Escape"&&document.querySelector("#adminModal")){closeAdminCenter();return;}
     if(document.body.classList.contains("capture-mode")&&e.key==="Escape")document.body.classList.remove("capture-mode");
   });
-  if("serviceWorker" in navigator)window.addEventListener("load",()=>navigator.serviceWorker.register("./sw.js").catch(console.warn));
+  if("serviceWorker" in navigator)window.addEventListener("load",async()=>{
+    try{
+      const reg=await navigator.serviceWorker.register("./sw.js");
+      wireServiceWorkerUpdates(reg);
+      reg.update().catch(()=>{});
+    }catch(err){console.warn("Service worker",err);}
+  });
 
   async function bootstrapCloud(){
     if(!window.MSRCloud?.enabled){cloudStatus="error";lastSyncError="Nube no configurada";renderSyncStatus();return;}
