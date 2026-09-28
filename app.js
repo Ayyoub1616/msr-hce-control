@@ -572,23 +572,7 @@
 
 
 
-  function openContainer(key){
-    const c=db.hce.find(x=>x.key===key);if(!c)return;
-    $("#containerDialogTitle").textContent=c.number||c.entryId||"HCE";
-    $("#c-number").value=c.number||"";$("#c-entry").value=c.entryId||"";$("#c-plan-date").value=c.planDate||"";$("#c-plan-time").value=c.planTime||"";$("#c-plan-qty").value=c.plannedQty??"";$("#c-transporter").value=c.transporter||"";
-    $("#c-real-date").value=c.realDate||"";$("#c-real-time").value=c.realTime||"";$("#c-process").value=c.process||"Pendiente de recibir";
-    $("#c-dock").value=c.dock||"";$("#c-registered").value=c.registered||"No";$("#c-located").value=c.located||"No";$("#c-five").value=c.five||"No";
-    $("#c-sample").value=c.sample||"Pendiente de sacar";$("#c-comment").value=c.comment||"";$("#containerDialog").dataset.key=key;$("#containerDialog").showModal();
-  }
-  $("#saveContainerBtn").onclick=()=>{
-    const key=$("#containerDialog").dataset.key,c=db.hce.find(x=>x.key===key);if(!c)return;
-    Object.assign(c,{realDate:$("#c-real-date").value,realTime:$("#c-real-time").value,process:$("#c-process").value,dock:$("#c-dock").value.trim(),
-      registered:$("#c-registered").value,located:$("#c-located").value,five:$("#c-five").value,sample:$("#c-sample").value,comment:$("#c-comment").value.trim(),updatedAt:nowISO()});
-    save();$("#containerDialog").close();toast("HCE actualizado");
-    if(c.process==="Descargado")setTimeout(()=>alert("DESCARGADO: introduce la cantidad REAL en HCE y dale salida."),50);
-    if(c.registered==="Si")setTimeout(()=>alert("MATRICULADO: en X, FINALIZA y después CIERRA la orden de descarga."),50);
-    render();
-  };
+
 
   function parseSemicolonCSV(text){
     const rows=[]; let row=[], field="", quoted=false;
