@@ -2121,70 +2121,18 @@
     return rows;
   }
 
-  function handleImport(file,kind){
-    if(!file)return;
-    if(!window.XLSX){
-      showEmployeePopup({
-        type:"error",
-        title:"No se puede abrir el archivo todavía",
-        message:"El lector de Excel no ha terminado de cargar.",
-        details:["Espera unos segundos y vuelve a intentarlo.","Si continúa, pulsa Actualizar o revisa la conexión."],
-        primaryText:"Entendido"
-      });
-      return;
-    }
-    const rd=new FileReader();
-    rd.onload=e=>{
-      try{
-        let rows=[];
-        const name=String(file.name||"").toLowerCase();
-
-        if(name.endsWith(".csv")){
-          const bytes=new Uint8Array(e.target.result);
-          let text="";
-          try{text=new TextDecoder("windows-1252").decode(bytes);}
-          catch{text=new TextDecoder("utf-8").decode(bytes);}
-          rows=parseSemicolonCSV(text);
-        }else{
-          const wb=XLSX.read(e.target.result,{type:"array",cellDates:true});
-          const ws=wb.Sheets[wb.SheetNames[0]];
-          rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:"",raw:true});
-        }
-
-        const clean=rows.filter(r=>r.some(v=>String(v).trim()!==""));
-        if(clean.length<2)throw new Error("Archivo vacío");
-
-        // Primera fila = cabeceras. Nunca se importa como dato.
-        const headers=clean[0].map(v=>String(v).trim());
-        const data=clean.slice(1);
-
-        if(kind==="msr")importMSR(headers,data); else importHCE(headers,data);
-      }catch(err){
-        console.error(err);
-        showEmployeePopup({
-          type:"error",
-          title:"No se ha podido importar el archivo",
-          message:err?.message||"No he podido interpretar el archivo.",
-          details:[
-            "Comprueba que has seleccionado el export correcto.",
-            "No se ha modificado la planificación con esta carga fallida.",
-            "Si el problema continúa, avisa al responsable/admin."
-          ],
-          primaryText:"Revisar archivo"
-        });
-      }
-    };
-    rd.readAsArrayBuffer(file);
+  function compareRecord(a,b,fields){
+    return fields.some(f=>String(a?.[f]??"")!==String(b?.[f]??""));
   }
 
-  function importMSR(h,rows){
+  function buildMSRPreview(headers,rows,fileName=""){
     const idx={
-      id:findHeader(h,["Código","Codigo","ID OT de reparto","ID reparto","OT reparto"]),
-      work:findHeader(h,["Orden de trabajo","Descripción","Descripcion"]),
-      sourceStatus:findHeader(h,["Estado"]),
-      store:findHeader(h,["Tienda"]),
-      chain:findHeader(h,["Cadena"]),
-      loadOT:findHeader(h,["Nº OT de carga","N OT de carga","OT de carga","numero ot carga"])
+      id:findHeader(headers,["Código","Codigo","ID OT de reparto","ID reparto","OT reparto"]),
+      work:findHeader(headers,["Orden de trabajo","Descripción","Descripcion"]),
+      sourceStatus:findHeader(headers,["Estado"]),
+      store:findHeader(headers,["Tienda"]),
+      chain:findHeader(headers,["Cadena"]),
+      loadOT:findHeader(headers,["Nº OT de carga","N OT de carga","OT de carga","numero ot carga"])
     };
     if(idx.id<0)throw new Error("No encuentro la columna Código");
 
@@ -2203,72 +2151,87 @@
     rows.forEach((r,i)=>{
       const line=i+2;
       const rawId=String(pick(r,idx.id)).trim();
-      if(!rawId){errors.push({line,message:"Código/ID vacío. La línea no se ha importado."});return;}
+      if(!rawId){errors.push({line,message:"Código/ID vacío. La línea quedará fuera de la importación."});return;}
       const id=idNorm(rawId);
-      if(!/^\d+$/.test(id)){errors.push({line,message:"Código/ID no numérico. La línea no se ha importado.",value:rawId});return;}
-
+      if(!/^\d+$/.test(id)){errors.push({line,message:"Código/ID no numérico. La línea quedará fuera.",value:rawId});return;}
       const work=String(pick(r,idx.work)).trim();
       const store=String(pick(r,idx.store)).trim();
       const inferred=inferPlanFromWork(work);
       if(!work)warnings.push({line,message:"Orden de trabajo vacía.",value:id});
       if(!store)warnings.push({line,message:"Tienda vacía.",value:id});
       if(!inferred.date||!inferred.time)warnings.push({line,message:"No se pudo obtener fecha/hora prevista desde Orden de trabajo.",value:work||id});
-      if(map.has(id))warnings.push({line,message:"ID duplicada en el fichero; se conserva la última aparición.",value:id});
-
+      if(map.has(id))warnings.push({line,message:"ID duplicada en el fichero; se conservará la última aparición.",value:id});
       map.set(id,{
         id,planDate:inferred.date,planTime:inferred.time,description:work,
         loadOT:String(pick(r,idx.loadOT)).trim(),
         sourceStatus:String(pick(r,idx.sourceStatus)).trim(),
-        store,chain:String(pick(r,idx.chain)).trim()
+        store,chain:String(pick(r,idx.chain)).trim(),
+        manual:false
       });
     });
 
-    db.msr=[...map.values()].sort((a,b)=>
-      (`${a.planDate}${a.planTime}${String(a.id).padStart(12,"0")}`)
-      .localeCompare(`${b.planDate}${b.planTime}${String(b.id).padStart(12,"0")}`)
+    const current=new Map(db.msr.map(o=>[idNorm(o.id),o]));
+    let manualMatches=0,manualKept=0;
+    current.forEach((o,id)=>{
+      if(o.manual&&map.has(id)){
+        manualMatches++;
+        warnings.push({line:"—",message:"La ID manual ya aparece en el fichero; los datos importados sustituirán los manuales y se conservará su estado.",value:id});
+      }else if(o.manual&&!map.has(id)){
+        manualKept++;
+        map.set(id,{...o});
+        warnings.push({line:"—",message:"ID manual no presente en el fichero; se conservará en la planificación.",value:id});
+      }
+    });
+
+    const candidate=[...map.values()].sort((a,b)=>
+      (`${a.planDate||""}${a.planTime||""}${String(a.id).padStart(12,"0")}`)
+      .localeCompare(`${b.planDate||""}${b.planTime||""}${String(b.id).padStart(12,"0")}`)
     );
-    db.msr.forEach(o=>stateFor(o.id));
-    db.meta.msrImportedAt=nowISO();
-    db.meta.lastImportReport={kind:"msr",at:nowISO(),totalRows:rows.length,imported:db.msr.length,errors,warnings};
-    save();
-    toast(errors.length?`⚠️ MSR: ${db.msr.length} importadas · ${errors.length} errores`:`✅ ${db.msr.length} órdenes MSR importadas`,errors.length>0);
-    const msrHasIssues=errors.length||warnings.length;
-    go(msrHasIssues?"import-msr":"resumen");
-    if(msrHasIssues)setTimeout(()=>importIssuesPopup("msr",errors,warnings),120);
+    const newMap=new Map(candidate.map(o=>[idNorm(o.id),o]));
+    let existing=0,newCount=0,changed=0;
+    newMap.forEach((o,id)=>{
+      const prev=current.get(id);
+      if(prev){
+        existing++;
+        if(compareRecord(prev,o,["description","store","planDate","planTime","loadOT","chain","sourceStatus"]))changed++;
+      }else newCount++;
+    });
+    const missing=[...current.keys()].filter(id=>!newMap.has(id)).length;
+
+    return {
+      kind:"msr",fileName,totalRows:rows.length,candidate,errors,warnings,
+      comparison:{existing,newCount,missing,changed,manualMatches,manualKept}
+    };
   }
 
-  function importHCE(h,rows){
+  function buildHCEPreview(headers,rows,fileName=""){
     const idx={
-      entry:findHeader(h,["ID ENTRADA","ID entrada","Entrada","ID"]),
-      task:findHeader(h,["ID TAREA","ID tarea"]),
-      planDate:findHeader(h,["FECHA PREVISTA","Fecha prevista","FECHA PLAN","Fecha plan"]),
-      planTime:findHeader(h,["HORA PREVISTA","Hora prevista","HORA PLAN","Hora plan"]),
-      number:findHeader(h,["MATRÍCULA","Matricula","Número contenedor","Numero contenedor","Contenedor"]),
-      transporter:findHeader(h,["TRANSPORTISTA","Transportista"]),
-      reason:findHeader(h,["RAZON","RAZÓN","Razon"]),
-      qty:findHeader(h,["CANTIDAD","Cantidad"])
+      entry:findHeader(headers,["ID ENTRADA","ID entrada","Entrada","ID"]),
+      task:findHeader(headers,["ID TAREA","ID tarea"]),
+      planDate:findHeader(headers,["FECHA PREVISTA","Fecha prevista","FECHA PLAN","Fecha plan"]),
+      planTime:findHeader(headers,["HORA PREVISTA","Hora prevista","HORA PLAN","Hora plan"]),
+      number:findHeader(headers,["MATRÍCULA","Matricula","Número contenedor","Numero contenedor","Contenedor"]),
+      transporter:findHeader(headers,["TRANSPORTISTA","Transportista"]),
+      reason:findHeader(headers,["RAZON","RAZÓN","Razon"]),
+      qty:findHeader(headers,["CANTIDAD","Cantidad"])
     };
     if(idx.entry<0&&idx.number<0)throw new Error("No encuentro ID ENTRADA / MATRÍCULA");
 
     const errors=[],warnings=[];
-    const old=new Map(db.hce.map(c=>[c.key,c]));
     const grouped=new Map();
-
     rows.forEach((r,i)=>{
       const line=i+2;
       const entryId=String(pick(r,idx.entry)).trim();
-      const number=String(pick(r,idx.number)).trim();
+      const number=String(pick(r,idx.number)).trim().toUpperCase();
       if(!entryId&&!number){errors.push({line,message:"Falta ID ENTRADA y MATRÍCULA. Línea omitida."});return;}
       const key=(number||entryId).toUpperCase();
       const planDate=parseDate(pick(r,idx.planDate));
       const planTime=parseTime(pick(r,idx.planTime));
       if(!planDate)warnings.push({line,message:"Fecha prevista vacía o no reconocida.",value:number||entryId});
       if(!planTime)warnings.push({line,message:"Hora prevista vacía o no reconocida.",value:number||entryId});
-
       const rawQty=pick(r,idx.qty);
       const qtyRaw=Number(rawQty)||0;
-      if(rawQty!==""&&!Number.isFinite(Number(rawQty)))warnings.push({line,message:"Cantidad no numérica; se toma como 0.",value:String(rawQty)});
-
+      if(rawQty!==""&&!Number.isFinite(Number(rawQty)))warnings.push({line,message:"Cantidad no numérica; se tomará como 0.",value:String(rawQty)});
       if(!grouped.has(key)){
         grouped.set(key,{
           key,number,entryId,entryIds:entryId?[entryId]:[],
@@ -2276,10 +2239,9 @@
           planDate,planTime,
           transporter:String(pick(r,idx.transporter)).trim(),
           reason:String(pick(r,idx.reason)).trim(),
-          plannedQty:0,lines:0
+          plannedQty:0,lines:0,manual:false
         });
       }
-
       const g=grouped.get(key);
       g.plannedQty+=qtyRaw;g.lines+=1;
       if(entryId&&!g.entryIds.includes(entryId))g.entryIds.push(entryId);
@@ -2289,18 +2251,167 @@
       if(!g.planTime)g.planTime=planTime;
     });
 
-    db.hce=[...grouped.values()].map(g=>{
-      const prev=old.get(g.key)||{};
-      return {...g,realDate:prev.realDate||"",realTime:prev.realTime||"",process:prev.process||"Pendiente de recibir",updatedAt:prev.updatedAt||null};
-    }).sort((a,b)=>(`${a.planDate}${a.planTime}`).localeCompare(`${b.planDate}${b.planTime}`));
+    const current=new Map(db.hce.map(x=>[String(x.key||x.number||x.entryId||"").toUpperCase(),x]));
+    let manualMatches=0,manualKept=0;
+    current.forEach((x,key)=>{
+      if(x.manual&&grouped.has(key)){
+        manualMatches++;
+        warnings.push({line:"—",message:"El HCE manual ya aparece en el fichero; se usarán los datos importados y se conservará llegada/estado.",value:key});
+      }else if(x.manual&&!grouped.has(key)){
+        manualKept++;
+        grouped.set(key,{...x});
+        warnings.push({line:"—",message:"HCE manual no presente en el fichero; se conservará.",value:key});
+      }
+    });
 
-    db.meta.hceImportedAt=nowISO();
-    db.meta.lastImportReport={kind:"hce",at:nowISO(),totalRows:rows.length,imported:db.hce.length,errors,warnings};
+    const candidate=[...grouped.values()].map(g=>{
+      const prev=current.get(String(g.key).toUpperCase())||{};
+      return {...g,realDate:prev.realDate||"",realTime:prev.realTime||"",process:prev.process||"Pendiente de recibir",updatedAt:prev.updatedAt||null};
+    }).sort((a,b)=>(`${a.planDate||""}${a.planTime||""}`).localeCompare(`${b.planDate||""}${b.planTime||""}`));
+
+    const newMap=new Map(candidate.map(x=>[String(x.key||x.number||x.entryId||"").toUpperCase(),x]));
+    let existing=0,newCount=0,changed=0;
+    newMap.forEach((x,key)=>{
+      const prev=current.get(key);
+      if(prev){
+        existing++;
+        if(compareRecord(prev,x,["number","entryId","planDate","planTime","transporter","reason","plannedQty"]))changed++;
+      }else newCount++;
+    });
+    const missing=[...current.keys()].filter(key=>!newMap.has(key)).length;
+    return {kind:"hce",fileName,totalRows:rows.length,candidate,errors,warnings,comparison:{existing,newCount,missing,changed,manualMatches,manualKept}};
+  }
+
+  function showImportPreview(preview){
+    pendingImportPreview=preview;
+    document.querySelector("#importPreviewModal")?.remove();
+    const p=preview;
+    const issues=[...(p.errors||[]).map(x=>({level:"error",...x})),...(p.warnings||[]).map(x=>({level:"warning",...x}))];
+    const overlay=document.createElement("div");
+    overlay.id="importPreviewModal";
+    overlay.className="import-preview-overlay";
+    overlay.innerHTML=`<div class="import-preview-shell">
+      <div class="import-preview-head">
+        <div>
+          <span>🔎 PREVISUALIZACIÓN SEGURA</span>
+          <h2>${p.kind==="msr"?"Importación MSR":"Importación HCE"}</h2>
+          <p>${esc(p.fileName||"Archivo")} · todavía NO se ha modificado ningún dato.</p>
+        </div>
+        <button id="importPreviewClose">✕</button>
+      </div>
+      <div class="import-preview-kpis">
+        <div><b>📄 ${p.totalRows}</b><span>Líneas leídas</span></div>
+        <div><b>✅ ${p.candidate.length}</b><span>Registros válidos</span></div>
+        <div><b>🆕 ${p.comparison.newCount}</b><span>Nuevos</span></div>
+        <div><b>🔁 ${p.comparison.existing}</b><span>Ya existentes</span></div>
+        <div><b>✏️ ${p.comparison.changed}</b><span>Con datos distintos</span></div>
+        <div><b>📤 ${p.comparison.missing}</b><span>Desaparecen</span></div>
+        <div><b>❌ ${p.errors.length}</b><span>Errores</span></div>
+        <div><b>⚠️ ${p.warnings.length}</b><span>Avisos</span></div>
+      </div>
+      ${p.comparison.manualMatches||p.comparison.manualKept?`<div class="import-preview-manual">
+        🧩 IDs manuales: <strong>${p.comparison.manualMatches||0}</strong> detectadas ahora en el fichero · <strong>${p.comparison.manualKept||0}</strong> se conservarán porque siguen sin aparecer.
+      </div>`:""}
+      <div class="import-preview-summary ${p.errors.length?"has-errors":"ok"}">
+        <strong>${p.errors.length?"⚠️ Hay líneas que no se importarán":"✅ Archivo listo para aplicar"}</strong>
+        <span>${p.errors.length?"Puedes importar únicamente los registros correctos o cancelar para corregir el fichero.":"Revisa el comparador y confirma la importación."}</span>
+      </div>
+      ${issues.length?`<div class="issue-list import-preview-issues">
+        ${issues.slice(0,40).map(x=>`<div class="issue-item ${x.level}">
+          <b>${x.level==="error"?"❌":"⚠️"} Línea ${x.line}</b>
+          <span>${esc(x.message)}</span>
+          ${x.value?`<code>${esc(x.value)}</code>`:""}
+        </div>`).join("")}
+        ${issues.length>40?`<div class="issue-more">… ${issues.length-40} incidencias adicionales</div>`:""}
+      </div>`:""}
+      <div class="import-preview-actions">
+        <button class="btn ghost" id="importPreviewCancel">Cancelar y corregir archivo</button>
+        <button class="btn primary" id="importPreviewApply" ${p.candidate.length?"":"disabled"}>✅ Importar ${p.candidate.length} registros correctos</button>
+      </div>
+    </div>`;
+    document.body.appendChild(overlay);
+    const cancel=()=>{pendingImportPreview=null;overlay.remove();};
+    overlay.querySelector("#importPreviewClose").onclick=cancel;
+    overlay.querySelector("#importPreviewCancel").onclick=cancel;
+    overlay.querySelector("#importPreviewApply").onclick=()=>applyImportPreview();
+  }
+
+  function applyImportPreview(){
+    const p=pendingImportPreview;
+    if(!p)return;
+    makeAdminSnapshot(`Antes de importar ${p.kind.toUpperCase()}`);
+    const at=nowISO();
+
+    if(p.kind==="msr"){
+      db.msr=p.candidate.map(o=>({...o}));
+      db.msr.forEach(o=>stateFor(o.id));
+      db.meta.msrImportedAt=at;
+    }else{
+      db.hce=p.candidate.map(x=>({...x}));
+      db.meta.hceImportedAt=at;
+    }
+
+    const report={
+      kind:p.kind,at,fileName:p.fileName,totalRows:p.totalRows,imported:p.candidate.length,
+      errors:p.errors,warnings:p.warnings,comparison:p.comparison
+    };
+    db.meta.lastImportReport=report;
+    addImportHistory(report);
+    logAudit("system",p.kind,"Importación aplicada",{fileName:p.fileName,imported:p.candidate.length,comparison:p.comparison,errors:p.errors.length,warnings:p.warnings.length},"importación");
     save();
-    toast(errors.length?`⚠️ HCE: ${db.hce.length} contenedores · ${errors.length} errores`:`✅ ${db.hce.length} contenedores HCE importados`,errors.length>0);
-    const hceHasIssues=errors.length||warnings.length;
-    go(hceHasIssues?"import-hce":"hce");
-    if(hceHasIssues)setTimeout(()=>importIssuesPopup("hce",errors,warnings),120);
+
+    document.querySelector("#importPreviewModal")?.remove();
+    pendingImportPreview=null;
+    const hasIssues=p.errors.length||p.warnings.length;
+    go(p.kind==="msr"?(hasIssues?"import-msr":"resumen"):(hasIssues?"import-hce":"hce"));
+    toast(`✅ Importación aplicada · ${p.candidate.length} registros`);
+    if(hasIssues)setTimeout(()=>importIssuesPopup(p.kind,p.errors,p.warnings),150);
+  }
+
+  function handleImport(file,kind){
+    if(!file)return;
+    if(!window.XLSX){
+      showEmployeePopup({
+        type:"error",title:"No se puede abrir el archivo todavía",
+        message:"El lector de Excel no ha terminado de cargar.",
+        details:["Espera unos segundos y vuelve a intentarlo.","Si continúa, pulsa Actualizar o revisa la conexión."],
+        primaryText:"Entendido"
+      });
+      return;
+    }
+    const rd=new FileReader();
+    rd.onload=e=>{
+      try{
+        let rows=[];
+        const name=String(file.name||"").toLowerCase();
+        if(name.endsWith(".csv")){
+          const bytes=new Uint8Array(e.target.result);
+          let text="";
+          try{text=new TextDecoder("windows-1252").decode(bytes);}
+          catch{text=new TextDecoder("utf-8").decode(bytes);}
+          rows=parseSemicolonCSV(text);
+        }else{
+          const wb=XLSX.read(e.target.result,{type:"array",cellDates:true});
+          const ws=wb.Sheets[wb.SheetNames[0]];
+          rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:"",raw:true});
+        }
+        const clean=rows.filter(r=>r.some(v=>String(v).trim()!==""));
+        if(clean.length<2)throw new Error("Archivo vacío");
+        const headers=clean[0].map(v=>String(v).trim());
+        const data=clean.slice(1);
+        const preview=kind==="msr"?buildMSRPreview(headers,data,file.name):buildHCEPreview(headers,data,file.name);
+        showImportPreview(preview);
+      }catch(err){
+        console.error(err);
+        showEmployeePopup({
+          type:"error",title:"No se ha podido analizar el archivo",
+          message:err?.message||"No he podido interpretar el archivo.",
+          details:["No se ha modificado ningún dato.","Comprueba que es el export correcto.","Si continúa, avisa al responsable/admin."],
+          primaryText:"Revisar archivo"
+        });
+      }
+    };
+    rd.readAsArrayBuffer(file);
   }
 
   document.querySelectorAll("#nav button").forEach(b=>b.onclick=()=>go(b.dataset.page));
