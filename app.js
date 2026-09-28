@@ -9,7 +9,7 @@
     msr: [],
     states: {},
     hce: [],
-    meta: { updatedAt: null, msrImportedAt: null, hceImportedAt: null }
+    meta: { updatedAt: null, msrImportedAt: null, hceImportedAt: null, lastImportReport: null }
   });
 
   let db = load();
@@ -137,6 +137,26 @@
     return `<span class="badge ${cls}">${esc(t)}</span>`;
   }
 
+  function msrRowClass(o,s){
+    if((s.serval||"No")==="Si")return "row-danger row-serval";
+    const t=timing(o,s);
+    if((s.shipping||"No")==="Total")return t.includes("TARDE")?"row-done-late":"row-success";
+    if((s.shipping||"No")==="Parcial")return "row-warning";
+    if(t.includes("RETRASO"))return "row-danger";
+    if(t.includes("FALTAN"))return "row-info";
+    return "row-neutral";
+  }
+
+  function hceRowClass(x){
+    const p=x.process||"Pendiente de recibir";
+    const t=hceTiming(x);
+    if(p==="Descargado")return t.kind==="red"?"row-done-late":"row-success";
+    if(t.kind==="red")return "row-danger";
+    if(p==="Descargando")return "row-purple";
+    if(p==="Posicionado")return "row-info";
+    return "row-warning-soft";
+  }
+
   function stateSelectClass(type,value){
     const v=String(value||"");
     if(type==="shipping"){
@@ -255,12 +275,13 @@
         </div>
       </div>
 
+      <button class="capture-exit capture-only" id="exitCaptureBtn">← Volver al panel</button>
       <section class="report-card" id="operationalReport">
         <div class="report-head">
           <div>
             <div class="eyebrow">📦 PARTE OPERATIVO · MSR / HCE</div>
             <h2>${rangeLabel}</h2>
-            <div class="report-sub">Estado operativo actualizado en tiempo real</div>
+            <div class="report-sub">🔄 Actualizado a fecha y hora exacta · este informe refleja el estado visible en el momento de generarlo.</div>
           </div>
           <div class="report-updated">🕒 ${new Date().toLocaleString("es-ES")}</div>
         </div>
@@ -270,6 +291,13 @@
           <div>${alerts.length?alerts.map(x=>`<span>${esc(x)}</span>`).join(""):"Todo está dentro de los parámetros visibles para este periodo."}</div>
         </div>
 
+        <div class="status-legend">
+          <span class="legend success">🟢 Finalizado / a tiempo</span>
+          <span class="legend warning">🟠 Parcial / pendiente</span>
+          <span class="legend danger">🔴 Retraso / incidencia</span>
+          <span class="legend info">🔵 En curso / próximo</span>
+          <span class="legend purple">🟣 Descargando</span>
+        </div>
         <div class="section-title">📋 Órdenes MSR</div>
         <div class="grid report-kpis visual-kpis">
           ${kpi("📦 Órdenes",msr.length,"Total del periodo")}
@@ -283,7 +311,7 @@
         <div class="table-wrap report-table">
           <table class="data-table report-data-table">
             <thead><tr><th>⏱ Cumplimiento</th><th>🔢 Código</th><th>📝 Orden de trabajo</th><th>🏬 Tienda</th><th>🚚 Envío</th><th>🕒 Expedición</th><th>⚠️ Serval</th><th>💬 Comentario</th></tr></thead>
-            <tbody>${msr.length?msr.map(({o,s})=>`<tr class="${s.serval==="Si"?"serval-alert":""}">
+            <tbody>${msr.length?msr.map(({o,s})=>`<tr class="${msrRowClass(o,s)} ${s.serval==="Si"?"serval-alert":""}">
               <td>${msrTimeBadge(o,s)}</td>
               <td><strong>${esc(o.id)}</strong></td>
               <td class="wrap">${esc(o.description||"")}</td>
@@ -309,7 +337,7 @@
         <div class="table-wrap report-table">
           <table class="data-table report-data-table">
             <thead><tr><th>⏱ Cumplimiento</th><th>🚛 Matrícula</th><th>📅 Previsto</th><th>📥 Llegada</th><th>📌 Estado</th></tr></thead>
-            <tbody>${hce.length?hce.map(x=>`<tr>
+            <tbody>${hce.length?hce.map(x=>`<tr class="${hceRowClass(x)}">
               <td>${timeBadge(hceTiming(x))}</td>
               <td><strong>${esc(x.number||x.entryId)}</strong></td>
               <td>${fmtDate(x.planDate)} · ${fmtTime(x.planTime)}</td>
@@ -368,7 +396,7 @@
       <th>Hora expedición</th>
       <th>Serval</th>
       <th>Comentario</th>
-    </tr></thead><tbody>${rr.map(({o,s})=>`<tr class="${s.serval==="Si"?"serval-alert":""}">
+    </tr></thead><tbody>${rr.map(({o,s})=>`<tr class="${msrRowClass(o,s)} ${s.serval==="Si"?"serval-alert":""}">
       <td><strong>${esc(o.id)}</strong></td>
       <td class="wrap msr-description">${esc(o.description||"")}</td>
       <td>${esc(o.store||"")}</td>
@@ -540,7 +568,7 @@
   function tableHCE(rows){
     if(!rows.length)return `<div class="empty">No hay contenedores HCE con estos filtros.</div>`;
     return `<table class="data-table hce-table simple-hce"><thead><tr><th>Cumplimiento</th><th>Matrícula</th><th>Fecha prevista</th><th>Hora prevista</th><th>Fecha llegada</th><th>Hora llegada</th><th>Estado</th></tr></thead>
-      <tbody>${rows.map(x=>`<tr>
+      <tbody>${rows.map(x=>`<tr class="${hceRowClass(x)}">
         <td>${timeBadge(hceTiming(x))}</td>
         <td><strong>${esc(x.number||x.entryId)}</strong></td>
         <td>${fmtDate(x.planDate)}</td>
@@ -806,7 +834,11 @@
       dashboardDateFrom=d.toISOString().slice(0,10);dashboardDateTo=end;render();
     };
     const dall=$("#dashboardAll"); if(dall)dall.onclick=()=>{dashboardDateFrom="";dashboardDateTo="";render()};
-    const capture=$("#captureModeBtn"); if(capture)capture.onclick=()=>document.body.classList.toggle("capture-mode");
+    const capture=$("#captureModeBtn"); if(capture)capture.onclick=()=>{
+      document.body.classList.add("capture-mode");
+      window.scrollTo({top:0,behavior:"smooth"});
+    };
+    const exitCapture=$("#exitCaptureBtn"); if(exitCapture)exitCapture.onclick=()=>document.body.classList.remove("capture-mode");
     const printBtn=$("#printDashboardBtn"); if(printBtn)printBtn.onclick=()=>window.print();
     const saveImg=$("#saveDashboardImageBtn"); if(saveImg)saveImg.onclick=async()=>{
       const report=$("#operationalReport");
@@ -1083,6 +1115,9 @@
   window.addEventListener("beforeinstallprompt",e=>{e.preventDefault();deferredInstall=e;$("#installBtn").hidden=false});
   $("#installBtn").onclick=async()=>{if(!deferredInstall)return;deferredInstall.prompt();await deferredInstall.userChoice;deferredInstall=null;$("#installBtn").hidden=true};
   window.addEventListener("storage",e=>{if(e.key===STORAGE_KEY){db=load();render()}});
+  window.addEventListener("keydown",e=>{
+    if(document.body.classList.contains("capture-mode")&&e.key==="Escape")document.body.classList.remove("capture-mode");
+  });
   if("serviceWorker" in navigator)window.addEventListener("load",()=>navigator.serviceWorker.register("./sw.js").catch(console.warn));
 
   async function bootstrapCloud(){
