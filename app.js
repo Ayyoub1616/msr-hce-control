@@ -3,6 +3,7 @@
   "use strict";
 
   const STORAGE_KEY = "msr_hce_control_v1";
+  const ADMIN_UNDO_KEY = "msr_hce_admin_undo_v1";
   const VERSION = 1;
   const defaultData = () => ({
     version: VERSION,
@@ -33,6 +34,7 @@
   let hceTimingFilter = "all";
   let hceSortKey = "planDateTime";
   let hceSortDir = "asc";
+  let adminNotice = "";
 
   const $ = s => document.querySelector(s);
   const content = $("#content");
@@ -660,47 +662,96 @@
   }
 
   function renderDatos(){
+    const orphanStates=Object.keys(db.states||{}).filter(id=>!db.msr.some(o=>idNorm(o.id)===id)).length;
+    const undo=(()=>{try{return JSON.parse(localStorage.getItem(ADMIN_UNDO_KEY)||"null")}catch{return null}})();
+
     content.innerHTML=`
       <div class="grid two-col">
         <div class="panel" style="margin-top:0">
-          <div class="panel-head"><div><h2>💾 Copia de seguridad</h2><p>Descarga o restaura una copia completa.</p></div></div>
+          <div class="panel-head"><div><h2>💾 Copias y recuperación</h2><p>Antes de cambios importantes, guarda una copia.</p></div></div>
           <div class="actions">
             <button class="btn primary" id="backupBtn">⬇️ Descargar backup</button>
             <button class="btn ghost" id="restoreBtn">⬆️ Restaurar backup</button>
-            <input id="restoreInput" type="file" accept=".json" hidden>
           </div>
+          <input id="restoreInput" type="file" accept=".json" hidden>
+          <div class="admin-mini-info">${undo?`↩️ Último punto de recuperación: ${new Date(undo.at).toLocaleString("es-ES")} · ${esc(undo.reason||"Cambio admin")}`:"ℹ️ Todavía no hay punto de recuperación admin."}</div>
         </div>
+
         <div class="panel" style="margin-top:0">
-          <div class="panel-head"><div><h2>☁️ Almacenamiento</h2><p>Nube + copia local del dispositivo.</p></div></div>
-          <div class="list">
-            <div class="list-item"><div><strong>${db.msr.length} órdenes</strong><small>MSR actuales</small></div></div>
-            <div class="list-item"><div><strong>${Object.keys(db.states).length} IDs</strong><small>Memoria histórica</small></div></div>
-            <div class="list-item"><div><strong>${db.hce.length} contenedores</strong><small>HCE actuales</small></div></div>
+          <div class="panel-head"><div><h2>☁️ Estado del sistema</h2><p>Resumen de datos compartidos.</p></div></div>
+          <div class="system-kpis">
+            <div><b>📦 ${db.msr.length}</b><span>MSR activas</span></div>
+            <div><b>💾 ${Object.keys(db.states||{}).length}</b><span>IDs en memoria</span></div>
+            <div><b>🧹 ${orphanStates}</b><span>Memorias no activas</span></div>
+            <div><b>🚛 ${db.hce.length}</b><span>HCE actuales</span></div>
           </div>
         </div>
       </div>
 
+      ${adminNotice?`<div class="admin-result"><strong>ℹ️ Resultado administrador</strong><pre>${esc(adminNotice)}</pre></div>`:""}
+
       <div class="panel admin-panel">
         <div class="panel-head">
-          <div><h2>🔐 Administrador</h2><p>Correcciones y sincronización avanzada.</p></div>
-          <span class="admin-badge">Protegido</span>
+          <div><h2>🔐 Centro de administrador</h2><p>Herramientas para localizar, corregir, recuperar o eliminar datos.</p></div>
+          <span class="admin-badge">Contraseña requerida</span>
         </div>
-        <div class="notice warn">Se pedirá contraseña antes de ejecutar cualquier herramienta.</div>
+
+        <div class="admin-help">
+          <span>🟢 Seguro: consultar/exportar</span>
+          <span>🟠 Precaución: reparar/sincronizar</span>
+          <span>🔴 Destructivo: borrar</span>
+        </div>
+
         <div class="admin-grid">
-          <button class="admin-action" data-admin-action="pull"><span>☁️⬇️</span><strong>Nube → dispositivo</strong><small>Descarga el estado más reciente</small></button>
-          <button class="admin-action" data-admin-action="push"><span>☁️⬆️</span><strong>Dispositivo → nube</strong><small>Fuerza la subida de esta copia</small></button>
-          <button class="admin-action" data-admin-action="repair"><span>🛠️</span><strong>Reparar datos</strong><small>Normaliza IDs y elimina duplicados</small></button>
-          <button class="admin-action" data-admin-action="reset-id"><span>🧹</span><strong>Resetear memoria ID</strong><small>Borra el estado guardado de una ID concreta</small></button>
-          <button class="admin-action" data-admin-action="clear-msr"><span>📦</span><strong>Vaciar MSR</strong><small>Conserva memoria por ID</small></button>
-          <button class="admin-action" data-admin-action="clear-hce"><span>🚛</span><strong>Vaciar HCE</strong><small>Elimina la planificación actual</small></button>
-          <button class="admin-action" data-admin-action="diag"><span>🧪</span><strong>Diagnóstico</strong><small>Descarga JSON técnico</small></button>
+          <button class="admin-action safe" data-admin-action="inspect-id"><span>🔎</span><strong>Buscar una ID</strong><small>Ver si está activa y qué memoria tiene guardada</small></button>
+          <button class="admin-action safe" data-admin-action="export-memory"><span>📤</span><strong>Exportar memoria</strong><small>Descarga todos los estados históricos</small></button>
+          <button class="admin-action safe" data-admin-action="diag"><span>🧪</span><strong>Diagnóstico completo</strong><small>Datos + último informe de importación</small></button>
+
+          <button class="admin-action warning" data-admin-action="pull"><span>☁️⬇️</span><strong>Nube → dispositivo</strong><small>Forzar descarga del estado compartido</small></button>
+          <button class="admin-action warning" data-admin-action="push"><span>☁️⬆️</span><strong>Dispositivo → nube</strong><small>Forzar esta copia como estado compartido</small></button>
+          <button class="admin-action warning" data-admin-action="repair"><span>🛠️</span><strong>Reparar estructura</strong><small>Normaliza IDs y elimina duplicados internos</small></button>
+          <button class="admin-action warning" data-admin-action="restore-undo"><span>↩️</span><strong>Deshacer último cambio admin</strong><small>Restaura el último punto automático</small></button>
+
+          <button class="admin-action danger-zone" data-admin-action="reset-id"><span>🧹</span><strong>Borrar memoria de ID</strong><small>Elimina solo su estado histórico guardado</small></button>
+          <button class="admin-action danger-zone" data-admin-action="delete-id-all"><span>🗑️</span><strong>Borrar ID por completo</strong><small>Elimina orden activa y memoria de esa ID</small></button>
+          <button class="admin-action danger-zone" data-admin-action="purge-orphans"><span>♻️</span><strong>Borrar memorias no activas</strong><small>Elimina estados de IDs que no están en el MSR actual</small></button>
+          <button class="admin-action danger-zone" data-admin-action="clear-msr"><span>📦</span><strong>Vaciar MSR</strong><small>Conserva todas las memorias por ID</small></button>
+          <button class="admin-action danger-zone" data-admin-action="clear-hce"><span>🚛</span><strong>Vaciar HCE</strong><small>Elimina planificación HCE actual</small></button>
         </div>
       </div>
 
       <div class="panel danger-admin">
-        <div class="panel-head"><div><h2>🚨 Borrado total</h2><p>Elimina planificación, memoria histórica y nube.</p></div></div>
-        <button class="btn danger" id="resetBtn">Borrar absolutamente todos los datos</button>
+        <div class="panel-head">
+          <div><h2>🚨 Borrado total protegido</h2><p>Último recurso. Elimina MSR, HCE, memoria histórica y estado compartido.</p></div>
+        </div>
+        <div class="notice danger">Requiere contraseña + doble confirmación. Descarga un backup antes de usarlo.</div>
+        <button class="btn danger" id="resetBtn">☢️ Borrar absolutamente todos los datos</button>
       </div>`;
+  }
+
+  function makeAdminSnapshot(reason){
+    try{
+      localStorage.setItem(ADMIN_UNDO_KEY,JSON.stringify({reason,at:nowISO(),db}));
+    }catch(err){console.warn("Admin snapshot",err);}
+  }
+
+  function adminStateSummary(id){
+    const k=idNorm(id);
+    const s=db.states?.[k];
+    const active=db.msr.find(o=>idNorm(o.id)===k);
+    if(!s&&!active)return null;
+    return {
+      id:k,
+      active:Boolean(active),
+      order:active?.description||"",
+      store:active?.store||"",
+      shipping:s?.shipping||"No",
+      date:s?.date||"",
+      time:s?.time||"",
+      serval:s?.serval||"No",
+      comment:s?.comment||"",
+      updatedAt:s?.updatedAt||null
+    };
   }
 
   async function adminAuth(){
@@ -718,26 +769,48 @@
 
   async function runAdminAction(action){
     if(!(await adminAuth()))return;
+
+    if(action==="inspect-id"){
+      const raw=prompt("Código / ID MSR que quieres consultar");
+      if(!raw)return;
+      const info=adminStateSummary(raw);
+      adminNotice=info
+        ? `ID: ${info.id}\nActiva ahora: ${info.active?"Sí":"No"}\nOrden: ${info.order||"—"}\nTienda: ${info.store||"—"}\nEnvío: ${info.shipping}\nExpedición: ${info.date||"—"} ${info.time||""}\nServal: ${info.serval}\nComentario: ${info.comment||"—"}\nÚltimo cambio: ${info.updatedAt?new Date(info.updatedAt).toLocaleString("es-ES"):"—"}`
+        : `No existe información guardada para la ID ${idNorm(raw)}.`;
+      render();return;
+    }
+
+    if(action==="export-memory"){
+      download(`msr-memoria-estados-${today()}.json`,JSON.stringify({exportedAt:nowISO(),states:db.states},null,2));
+      toast("📤 Memoria de estados exportada");return;
+    }
+
     if(action==="pull"){
       if(!window.MSRCloud?.enabled){toast("Nube no disponible",true);return;}
+      if(!confirm("¿Sustituir la copia de este dispositivo por la versión de la nube?"))return;
+      makeAdminSnapshot("Antes de forzar nube → dispositivo");
       try{
         const cloud=await window.MSRCloud.load();
         if(!cloud?.version){toast("No hay datos válidos en la nube",true);return;}
-        db=cloud;
-        localStorage.setItem(STORAGE_KEY,JSON.stringify(db));
-        render();
-        toast("☁️ Datos descargados desde la nube");
+        db=cloud;localStorage.setItem(STORAGE_KEY,JSON.stringify(db));
+        adminNotice="Se ha cargado manualmente la copia de la nube.";
+        render();toast("☁️ Datos descargados desde la nube");
       }catch(e){console.warn(e);toast("Error al descargar desde la nube",true);}
       return;
     }
+
     if(action==="push"){
       if(!window.MSRCloud?.enabled){toast("Nube no disponible",true);return;}
       if(!confirm("¿Sobrescribir la nube con los datos de ESTE dispositivo?"))return;
-      try{await window.MSRCloud.save(db);toast("☁️ Datos enviados a la nube");}
+      makeAdminSnapshot("Antes de forzar dispositivo → nube");
+      try{await window.MSRCloud.save(db);adminNotice="La copia de este dispositivo se ha forzado a la nube.";render();toast("☁️ Datos enviados a la nube");}
       catch(e){console.warn(e);toast("Error al subir a la nube",true);}
       return;
     }
+
     if(action==="repair"){
+      makeAdminSnapshot("Antes de reparar estructura");
+      const before={msr:db.msr.length,hce:db.hce.length,states:Object.keys(db.states||{}).length};
       const mm=new Map();
       db.msr.forEach(o=>{const id=idNorm(o.id);if(id)mm.set(id,{...o,id});});
       db.msr=[...mm.values()];
@@ -747,33 +820,70 @@
       const states={};
       Object.entries(db.states||{}).forEach(([id,s])=>{const k=idNorm(id||s?.id);if(k)states[k]={...s,id:k};});
       db.states=states;
-      save();render();toast("🛠️ Reparación completada");
-      return;
+      const after={msr:db.msr.length,hce:db.hce.length,states:Object.keys(db.states).length};
+      adminNotice=`Reparación completada.\nMSR: ${before.msr} → ${after.msr}\nHCE: ${before.hce} → ${after.hce}\nMemorias: ${before.states} → ${after.states}`;
+      save();render();toast("🛠️ Reparación completada");return;
     }
+
+    if(action==="restore-undo"){
+      let snap=null;try{snap=JSON.parse(localStorage.getItem(ADMIN_UNDO_KEY)||"null")}catch{}
+      if(!snap?.db){toast("No hay punto de recuperación disponible",true);return;}
+      if(!confirm(`¿Restaurar el estado anterior guardado el ${new Date(snap.at).toLocaleString("es-ES")}?\n${snap.reason||""}`))return;
+      db=snap.db;save();adminNotice="Se restauró el último punto de recuperación admin.";render();toast("↩️ Estado restaurado");return;
+    }
+
     if(action==="reset-id"){
-      const raw=prompt("Código / ID MSR que quieres resetear");
-      if(!raw)return;
-      const id=idNorm(raw);
+      const raw=prompt("Código / ID cuya MEMORIA quieres borrar");
+      if(!raw)return;const id=idNorm(raw);
       if(!db.states[id]){toast("Esa ID no tiene memoria guardada",true);return;}
-      if(!confirm(`¿Resetear la memoria guardada de la ID ${id}?`))return;
-      delete db.states[id];
-      save();render();toast(`ID ${id} reseteada`);
-      return;
+      if(!confirm(`¿Borrar la memoria histórica de la ID ${id}? La orden activa, si existe, se mantendrá.`))return;
+      makeAdminSnapshot(`Antes de borrar memoria ID ${id}`);
+      delete db.states[id];save();adminNotice=`Memoria de ID ${id} eliminada.`;render();toast(`🧹 Memoria ${id} borrada`);return;
     }
+
+    if(action==="delete-id-all"){
+      const raw=prompt("Código / ID que quieres ELIMINAR POR COMPLETO");
+      if(!raw)return;const id=idNorm(raw);
+      const hasState=Boolean(db.states[id]);const active=db.msr.some(o=>idNorm(o.id)===id);
+      if(!hasState&&!active){toast("No existe esa ID",true);return;}
+      if(!confirm(`¿Eliminar por completo la ID ${id}?\nOrden activa: ${active?"Sí":"No"}\nMemoria: ${hasState?"Sí":"No"}`))return;
+      makeAdminSnapshot(`Antes de eliminar ID completa ${id}`);
+      db.msr=db.msr.filter(o=>idNorm(o.id)!==id);delete db.states[id];
+      save();adminNotice=`ID ${id} eliminada de planificación y memoria.`;render();toast(`🗑️ ID ${id} eliminada`);return;
+    }
+
+    if(action==="purge-orphans"){
+      const active=new Set(db.msr.map(o=>idNorm(o.id)));
+      const ids=Object.keys(db.states||{}).filter(id=>!active.has(id));
+      if(!ids.length){toast("No hay memorias no activas");return;}
+      if(!confirm(`¿Borrar ${ids.length} memorias de IDs que NO están en el MSR actual?\nEsto elimina su histórico guardado.`))return;
+      makeAdminSnapshot("Antes de borrar memorias no activas");
+      ids.forEach(id=>delete db.states[id]);save();
+      adminNotice=`Se eliminaron ${ids.length} memorias no activas.`;
+      render();toast(`♻️ ${ids.length} memorias eliminadas`);return;
+    }
+
     if(action==="clear-msr"){
       if(!confirm("¿Vaciar planificación MSR? La memoria por ID se conservará."))return;
-      db.msr=[];db.meta.msrImportedAt=null;save();render();toast("MSR vaciado · memoria conservada");
-      return;
+      makeAdminSnapshot("Antes de vaciar MSR");
+      db.msr=[];db.meta.msrImportedAt=null;save();adminNotice="Planificación MSR vaciada; memoria conservada.";render();toast("MSR vaciado · memoria conservada");return;
     }
+
     if(action==="clear-hce"){
       if(!confirm("¿Vaciar todos los contenedores HCE actuales?"))return;
-      db.hce=[];db.meta.hceImportedAt=null;save();render();toast("HCE vaciado");
-      return;
+      makeAdminSnapshot("Antes de vaciar HCE");
+      db.hce=[];db.meta.hceImportedAt=null;save();adminNotice="Planificación HCE vaciada.";render();toast("HCE vaciado");return;
     }
+
     if(action==="diag"){
-      const diag={generatedAt:nowISO(),version:db.version,meta:db.meta,counts:{msr:db.msr.length,states:Object.keys(db.states||{}).length,hce:db.hce.length},data:db};
+      const activeIds=new Set(db.msr.map(o=>idNorm(o.id)));
+      const diag={
+        generatedAt:nowISO(),version:db.version,meta:db.meta,
+        counts:{msr:db.msr.length,states:Object.keys(db.states||{}).length,hce:db.hce.length,orphanStates:Object.keys(db.states||{}).filter(id=>!activeIds.has(id)).length},
+        lastImportReport:db.meta?.lastImportReport||null,data:db
+      };
       download(`msr-hce-diagnostico-${today()}.json`,JSON.stringify(diag,null,2));
-      toast("Diagnóstico descargado");
+      toast("🧪 Diagnóstico descargado");return;
     }
   }
 
@@ -950,15 +1060,15 @@
 
     document.querySelectorAll("[data-admin-action]").forEach(btn=>btn.onclick=()=>runAdminAction(btn.dataset.adminAction));
     const backup=$("#backupBtn"); if(backup)backup.onclick=()=>download(`msr-hce-backup-${today()}.json`,JSON.stringify(db,null,2));
-    const restore=$("#restoreBtn"),ri=$("#restoreInput"); if(restore)restore.onclick=()=>ri.click();
+    const restore=$("#restoreBtn"),ri=$("#restoreInput"); if(restore)restore.onclick=async()=>{if(await adminAuth())ri.click();};
     if(ri)ri.onchange=e=>{
-      const f=e.target.files[0];if(!f)return;const rd=new FileReader();rd.onload=()=>{try{const x=JSON.parse(rd.result);if(!x.version)throw 0;db=x;save();toast("Backup restaurado");render()}catch{toast("Backup no válido",true)}};rd.readAsText(f);
+      const f=e.target.files[0];if(!f)return;const rd=new FileReader();rd.onload=()=>{try{const x=JSON.parse(rd.result);if(!x.version)throw 0;makeAdminSnapshot("Antes de restaurar backup");db=x;save();adminNotice="Backup restaurado correctamente.";toast("Backup restaurado");render()}catch{toast("Backup no válido",true)}};rd.readAsText(f);
     };
     const reset=$("#resetBtn");if(reset)reset.onclick=async()=>{
       if(!(await adminAuth()))return;
       if(!confirm("¿Borrar TODOS los datos de MSR, estados y HCE?"))return;
       if(!confirm("Confirmación FINAL: también se eliminará la memoria histórica y la nube. ¿Continuar?"))return;
-      db=defaultData();save();if(window.MSRCloud?.enabled)window.MSRCloud.clear().catch(console.warn);toast("Datos eliminados");render();
+      makeAdminSnapshot("Antes del borrado total");db=defaultData();save();if(window.MSRCloud?.enabled)window.MSRCloud.clear().catch(console.warn);adminNotice="Se ejecutó un borrado total.";toast("Datos eliminados");render();
     };
   }
 
