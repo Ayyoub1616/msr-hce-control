@@ -49,3 +49,27 @@ main{min-width:0}.topbar{height:82px;background:rgba(255,255,255,.9);backdrop-fi
 .msr-situation{min-width:120px}
 @media(max-width:1200px){.msr-filter-grid{grid-template-columns:repeat(3,minmax(140px,1fr))}}
 @media(max-width:760px){.msr-filter-grid{grid-template-columns:1fr 1fr}.msr-filter-grid .wide-filter{grid-column:span 2}}
+
+.dashboard-toolbar{display:flex;justify-content:flex-end;margin-bottom:12px}
+.report-card{background:#fff;border:1px solid var(--line);border-radius:20px;padding:22px;box-shadow:var(--shadow)}
+.report-head{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;border-bottom:2px solid #0f172a;padding-bottom:14px;margin-bottom:16px}
+.report-head h2{margin:4px 0 0;font-size:25px}.eyebrow{font-size:11px;font-weight:900;letter-spacing:.12em;color:#64748b}.report-updated{font-size:12px;color:#64748b}
+.section-title{font-size:13px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;color:#334155;margin:18px 0 10px}
+.hce-title{margin-top:26px}
+.report-kpis{grid-template-columns:repeat(5,minmax(0,1fr));margin-bottom:14px}.hce-kpis{grid-template-columns:repeat(4,minmax(0,1fr))}
+.report-kpis .kpi{box-shadow:none;padding:14px}.report-kpis .kpi strong{font-size:24px}
+.report-table{max-height:430px}
+.hce-filter-grid{display:grid;grid-template-columns:repeat(7,minmax(130px,1fr));gap:10px;margin:12px 0 14px}
+.hce-filter-grid label{font-size:11px;font-weight:800;color:#475569;text-transform:uppercase;letter-spacing:.03em}
+.hce-filter-grid .filter-input{display:block;width:100%;margin-top:5px}
+body.capture-mode .sidebar,body.capture-mode .topbar,body.capture-mode .no-capture{display:none!important}
+body.capture-mode #app{display:block}
+body.capture-mode .content{padding:12px;max-width:none}
+body.capture-mode .report-card{box-shadow:none;border:0}
+@media(max-width:1200px){.report-kpis{grid-template-columns:repeat(3,1fr)}.hce-filter-grid{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:760px){.report-kpis,.hce-kpis{grid-template-columns:1fr 1fr}.hce-filter-grid{grid-template-columns:1fr 1fr}.report-head{display:block}.report-updated{margin-top:8px}}
+@media print{
+  .sidebar,.topbar,.no-capture{display:none!important}
+  #app{display:block}.content{padding:0;max-width:none}.report-card{border:0;box-shadow:none;padding:0}
+  .report-table{max-height:none;overflow:visible}.data-table{font-size:10px}
+}
