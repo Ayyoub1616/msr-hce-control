@@ -847,3 +847,33 @@ body.capture-mode .employee-popup-overlay{display:none!important}
   .manual-entry-form{grid-template-columns:1fr}
   .manual-entry-form label.wide{grid-column:auto}
 }
+
+/* Safe import preview v34 */
+.import-preview-overlay{
+  position:fixed;inset:0;z-index:1400;background:rgba(15,23,42,.58);backdrop-filter:blur(5px);
+  display:grid;place-items:center;padding:18px
+}
+.import-preview-shell{
+  width:min(1050px,100%);max-height:calc(100vh - 36px);overflow:auto;background:#f8fafc;border-radius:21px;
+  box-shadow:0 30px 90px rgba(15,23,42,.35)
+}
+.import-preview-head{
+  display:flex;justify-content:space-between;gap:16px;padding:18px 20px;background:#fff;border-bottom:1px solid #e2e8f0
+}
+.import-preview-head span{font-size:9px;font-weight:900;letter-spacing:.12em;color:#2563eb}
+.import-preview-head h2{font-size:21px;margin:4px 0 3px}.import-preview-head p{margin:0;color:#64748b;font-size:11px}
+.import-preview-head button{width:36px;height:36px;border-radius:10px;border:1px solid #cbd5e1;background:#fff}
+.import-preview-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:14px 18px}
+.import-preview-kpis>div{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:10px}
+.import-preview-kpis b,.import-preview-kpis span{display:block}.import-preview-kpis b{font-size:16px}.import-preview-kpis span{font-size:9px;color:#64748b;margin-top:2px}
+.import-preview-manual{margin:0 18px 10px;padding:9px 11px;border-radius:11px;background:#eff6ff;border:1px solid #bfdbfe;color:#1e40af;font-size:10px}
+.import-preview-summary{margin:0 18px 12px;padding:11px 13px;border-radius:12px;display:flex;flex-direction:column;gap:3px}
+.import-preview-summary.ok{background:#ecfdf5;border:1px solid #bbf7d0;color:#166534}
+.import-preview-summary.has-errors{background:#fff7ed;border:1px solid #fed7aa;color:#9a3412}
+.import-preview-summary strong{font-size:12px}.import-preview-summary span{font-size:10px}
+.import-preview-issues{margin:0 18px;max-height:280px}
+.import-preview-actions{display:flex;justify-content:flex-end;gap:8px;padding:14px 18px 18px}
+@media(max-width:700px){
+  .import-preview-kpis{grid-template-columns:1fr 1fr}
+  .import-preview-actions{flex-direction:column-reverse}.import-preview-actions .btn{width:100%}
+}
