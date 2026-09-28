@@ -687,3 +687,69 @@ body.capture-mode .sync-banner{display:none!important}
   .admin-search-row{flex-wrap:wrap}.admin-search-row .btn{width:100%}
   .admin-category{grid-template-columns:48px minmax(0,1fr) 20px;padding:13px}
 }
+
+/* App update + resilience UX v29 */
+.app-update-banner{
+  position:sticky;top:82px;z-index:9;
+  display:flex;align-items:center;justify-content:space-between;gap:16px;
+  padding:11px 28px;
+  background:linear-gradient(90deg,#fff7ed,#fffbeb);
+  border-bottom:1px solid #fdba74;
+  box-shadow:0 5px 18px rgba(146,64,14,.08)
+}
+.app-update-banner[hidden]{display:none!important}
+.app-update-copy{display:flex;align-items:center;gap:11px;min-width:0}
+.app-update-icon{
+  width:34px;height:34px;border-radius:11px;display:grid;place-items:center;
+  background:#ffedd5;font-size:18px;box-shadow:inset 0 0 0 1px #fed7aa
+}
+.app-update-copy strong,.app-update-copy small{display:block}
+.app-update-copy strong{font-size:12px;color:#9a3412}
+.app-update-copy small{font-size:10px;color:#92400e;margin-top:2px}
+.app-update-actions{display:flex;align-items:center;gap:7px;flex:0 0 auto}
+.update-now-btn{
+  background:#ea580c!important;color:#fff!important;border:1px solid #c2410c!important;
+  box-shadow:0 5px 14px rgba(234,88,12,.18)
+}
+.update-now-btn:hover{background:#c2410c!important}
+.update-later-btn{
+  border:0;background:transparent;color:#9a3412;font-size:10px;font-weight:800;padding:7px;cursor:pointer
+}
+body.capture-mode .app-update-banner{display:none!important}
+
+/* If both banners are visible, sync stays below update */
+.app-update-banner:not([hidden]) + .sync-banner{top:138px}
+
+/* General visual refinements */
+.panel-head{gap:14px}
+.panel-head>div:first-child{min-width:0}
+.panel-head h2{line-height:1.15}
+.panel-head p{line-height:1.4;max-width:760px}
+.btn{font-weight:800}
+.filter-input,.modern-control,.msr-edit,.hce-edit{font-size:12px}
+.actions{row-gap:7px}
+.notice{line-height:1.45}
+.toast{max-width:min(520px,calc(100vw - 28px));font-weight:750}
+
+/* More readable empty states */
+.empty{
+  padding:28px 18px!important;color:#64748b!important;
+  background:linear-gradient(180deg,#fff,#f8fafc)!important
+}
+
+/* safer buttons */
+.btn.danger,.admin-tool-card.nuclear{box-shadow:none}
+.btn.danger:hover,.admin-tool-card.nuclear:hover{box-shadow:0 7px 20px rgba(239,68,68,.12)}
+
+/* Mobile: banners don't overlap header */
+@media(max-width:760px){
+  .app-update-banner{top:64px;padding:9px 12px;align-items:flex-start}
+  .app-update-copy small{display:none}
+  .app-update-actions{gap:3px}
+  .update-now-btn{font-size:10px;padding:7px 8px}
+  .update-later-btn{font-size:9px}
+  .app-update-banner:not([hidden]) + .sync-banner{top:113px}
+}
+@media print{
+  .app-update-banner{display:none!important}
+}
