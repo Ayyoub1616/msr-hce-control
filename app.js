@@ -10,7 +10,7 @@
     msr: [],
     states: {},
     hce: [],
-    meta: { updatedAt: null, msrImportedAt: null, hceImportedAt: null, lastImportReport: null, importHistory: [], auditLog: [], trash: [] }
+    meta: { updatedAt: null, msrImportedAt: null, hceImportedAt: null, lastImportReport: null, importHistory: [], auditLog: [], trash: [], errorLog: [] }
   });
 
   let db = load();
@@ -22,10 +22,13 @@
   let summaryDateTo = "";
   let summaryShippingFilter = "all";
   let summaryServalFilter = "all";
+  let summaryPickingFilter = "all";
   let summaryTextFilter = "";
   let summaryIdsFilter = [];
   let summarySortKey = "planDateTime";
   let summarySortDir = "asc";
+  let summaryPage = 1;
+  let summaryPageSize = 25;
   let dashboardDateFrom = today();
   let dashboardDateTo = today();
   let hceDateFrom = "";
@@ -34,6 +37,8 @@
   let hceTimingFilter = "all";
   let hceSortKey = "planDateTime";
   let hceSortDir = "asc";
+  let hcePage = 1;
+  let hcePageSize = 25;
   let adminNotice = "";
   let adminSession = false;
   let adminModalSection = null;
@@ -57,7 +62,14 @@
       msr:Array.isArray(x.msr)?x.msr:[],
       states:x.states&&typeof x.states==="object"?x.states:{},
       hce:Array.isArray(x.hce)?x.hce:[],
-      meta:{...base.meta,...(x.meta||{})}
+      meta:{
+        ...base.meta,
+        ...(x.meta||{}),
+        importHistory:Array.isArray(x.meta?.importHistory)?x.meta.importHistory:[],
+        auditLog:Array.isArray(x.meta?.auditLog)?x.meta.auditLog:[],
+        trash:Array.isArray(x.meta?.trash)?x.meta.trash:[],
+        errorLog:Array.isArray(x.meta?.errorLog)?x.meta.errorLog:[]
+      }
     };
   }
 
@@ -427,7 +439,12 @@
   function stateFor(id){
     const k=idNorm(id);
     if(!db.states[k]) db.states[k]={id:k,status:"Pendiente",date:"",time:"",shipping:"No",serval:"No",comment:"",updatedAt:null};
-    return db.states[k];
+    const s=db.states[k];
+    if(!["Pendiente","En proceso","Finalizado"].includes(s.status))s.status="Pendiente";
+    if(!["No","Parcial","Total"].includes(s.shipping))s.shipping="No";
+    if(!["No","Si"].includes(s.serval))s.serval="No";
+    s.date=s.date||"";s.time=s.time||"";s.comment=s.comment||"";
+    return s;
   }
   function palletsLeft(s){
     const t=Number(s.total), n=Number(s.sent);
@@ -594,6 +611,11 @@
     if(type==="serval"){
       return v==="Si"?"select-danger":"select-ok-soft";
     }
+    if(type==="picking"){
+      if(v==="Finalizado")return "select-ok";
+      if(v==="En proceso")return "select-info";
+      return "select-warn-soft";
+    }
     if(type==="hce"){
       if(v==="Descargado")return "select-ok";
       if(v==="Descargando")return "select-purple";
@@ -709,6 +731,9 @@
     const msrPartial=msr.filter(({s})=>(s.shipping||"No")==="Parcial").length;
     const msrTotal=msr.filter(({s})=>(s.shipping||"No")==="Total").length;
     const msrServal=msr.filter(({s})=>(s.serval||"No")==="Si").length;
+    const pickPending=msr.filter(({s})=>(s.status||"Pendiente")==="Pendiente").length;
+    const pickProcess=msr.filter(({s})=>(s.status||"Pendiente")==="En proceso").length;
+    const pickDone=msr.filter(({s})=>(s.status||"Pendiente")==="Finalizado").length;
     const msrLate=msr.filter(({o,s})=>timing(o,s).includes("RETRASO")||timing(o,s).includes("TARDE")).length;
 
     const hcePending=hce.filter(x=>!(x.realDate&&x.realTime)).length;
@@ -729,7 +754,7 @@
       : "Todas las fechas";
     const detectedProblems=detectProblems();
     const criticalProblems=detectedProblems.filter(x=>x.severity==="error").length;
-    const shiftSummary=`MSR: ${msr.length} órdenes · ${msrNo} sin enviar · ${msrPartial} parciales · ${msrTotal} totales · ${msrLate} con retraso. HCE: ${hce.length} previstos · ${hcePending} pendientes de llegada · ${hceDownloading} descargando · ${hceDone} descargados · ${hceLate} llegaron tarde.`;
+    const shiftSummary=`MSR: ${msr.length} órdenes · Picking ${pickPending} pendientes / ${pickProcess} en proceso / ${pickDone} finalizados · ${msrNo} sin enviar · ${msrPartial} parciales · ${msrTotal} totales · ${msrLate} con retraso. HCE: ${hce.length} previstos · ${hcePending} pendientes de llegada · ${hceDownloading} descargando · ${hceDone} descargados · ${hceLate} llegaron tarde.`;
     const shiftStatus=criticalProblems>0
       ?`Turno con ${criticalProblems} incidencia(s) crítica(s) que requieren revisión.`
       :detectedProblems.length
@@ -805,17 +830,18 @@
 
         <div class="table-wrap report-table">
           <table class="data-table report-data-table">
-            <thead><tr><th>⏱ Cumplimiento</th><th>🔢 Código</th><th>📝 Orden de trabajo</th><th>🏬 Tienda</th><th>🚚 Envío</th><th>🕒 Expedición</th><th>⚠️ Serval</th><th>💬 Comentario</th></tr></thead>
+            <thead><tr><th>⏱ Cumplimiento</th><th>🔢 Código</th><th>📦 Picking</th><th>📝 Orden de trabajo</th><th>🏬 Tienda</th><th>🚚 Envío</th><th>🕒 Expedición</th><th>⚠️ Serval</th><th>💬 Comentario</th></tr></thead>
             <tbody>${msr.length?msr.map(({o,s})=>`<tr class="${msrRowClass(o,s)} ${s.serval==="Si"?"serval-alert":""}">
               <td>${msrComplianceCell(o,s)}</td>
               <td><strong>${esc(o.id)}</strong></td>
+              <td>${pickingBadge(s.status||"Pendiente")}</td>
               <td class="wrap">${esc(o.description||"")}</td>
               <td>${esc(o.store||"")}</td>
               <td>${msrShippingBadge(s.shipping||"No")}</td>
               <td>${s.date?`${fmtDate(s.date)} · ${fmtTime(s.time)}`:"—"}</td>
               <td>${servalBadge(s.serval||"No")}</td>
               <td class="wrap">${esc(s.comment||"")}</td>
-            </tr>`).join(""):`<tr><td colspan="8" class="empty">No hay órdenes MSR en este periodo.</td></tr>`}</tbody>
+            </tr>`).join(""):`<tr><td colspan="9" class="empty">No hay órdenes MSR en este periodo.</td></tr>`}</tbody>
           </table>
         </div>
 
@@ -873,6 +899,42 @@
     return db.msr.map(o=>({o,s:stateFor(o.id)}));
   }
 
+  function pickingOptions(current){
+    const items=[
+      ["Pendiente","📦 Pendiente · picking todavía no finalizado"],
+      ["En proceso","🔄 En proceso · picking en curso"],
+      ["Finalizado","✅ Finalizado · picking completado"]
+    ];
+    return items.map(([v,label])=>`<option value="${v}" ${current===v?"selected":""}>${label}</option>`).join("");
+  }
+
+  function pickingBadge(value){
+    const v=value||"Pendiente";
+    if(v==="Finalizado")return '<span class="status-chip pick-done">✅ Finalizado</span>';
+    if(v==="En proceso")return '<span class="status-chip pick-process">🔄 En proceso</span>';
+    return '<span class="status-chip pick-pending">📦 Pendiente</span>';
+  }
+
+  function pagerHtml(prefix,page,pageSize,total){
+    const pages=Math.max(1,Math.ceil(total/pageSize));
+    const safe=Math.min(Math.max(1,page),pages);
+    const from=total?((safe-1)*pageSize)+1:0;
+    const to=Math.min(total,safe*pageSize);
+    return `<div class="table-pager">
+      <div class="pager-info"><strong>${from}–${to}</strong> de ${total}</div>
+      <div class="pager-actions">
+        <label>Mostrar
+          <select id="${prefix}PageSize" class="pager-select">
+            ${[25,50,100].map(n=>`<option value="${n}" ${pageSize===n?"selected":""}>${n}</option>`).join("")}
+          </select>
+        </label>
+        <button class="btn ghost pager-btn" id="${prefix}Prev" ${safe<=1?"disabled":""}>← Anterior</button>
+        <span class="pager-page">Página ${safe} / ${pages}</span>
+        <button class="btn ghost pager-btn" id="${prefix}Next" ${safe>=pages?"disabled":""}>Siguiente →</button>
+      </div>
+    </div>`;
+  }
+
   function shippingOptions(current){
     const items=[
       ["No","⏳ No enviado · todavía no ha salido mercancía"],
@@ -920,22 +982,24 @@
     if(!rr.length)return `<div class="empty">No hay órdenes MSR con estos filtros.</div>`;
 
     if(compact){
-      return `<table class="data-table"><thead><tr><th>Código</th><th>Orden de trabajo</th><th>Tienda</th></tr></thead><tbody>${rr.map(({o})=>`<tr><td><strong>${esc(o.id)}</strong></td><td class="wrap">${esc(o.description||"")}</td><td>${esc(o.store||"")}</td></tr>`).join("")}</tbody></table>`;
+      return `<table class="data-table compact-table"><thead><tr><th>Código</th><th>Picking</th><th>Orden de trabajo</th><th>Tienda</th></tr></thead><tbody>${rr.map(({o,s})=>`<tr><td><strong>${esc(o.id)}</strong></td><td>${pickingBadge(s.status||"Pendiente")}</td><td class="wrap">${esc(o.description||"")}</td><td>${esc(o.store||"")}</td></tr>`).join("")}</tbody></table>`;
     }
 
     return `<table class="data-table msr-table"><thead><tr>
-      <th>Código</th>
-      <th>Orden de trabajo</th>
-      <th>Tienda</th>
-      <th>Envío</th>
-      <th>Fecha expedición</th>
-      <th>Hora expedición</th>
-      <th>Serval</th>
-      <th>Comentario</th>
+      <th class="c-code">Código</th>
+      <th class="c-picking">Picking</th>
+      <th class="c-work">Orden de trabajo</th>
+      <th class="c-store">Tienda</th>
+      <th class="c-shipping">Envío</th>
+      <th class="c-date">Fecha expedición</th>
+      <th class="c-time">Hora expedición</th>
+      <th class="c-serval">Serval</th>
+      <th class="c-comment">Comentario</th>
     </tr></thead><tbody>${rr.map(({o,s})=>`<tr class="${msrRowClass(o,s)} ${s.serval==="Si"?"serval-alert":""}">
       <td><strong>${esc(o.id)}</strong></td>
+      <td><select class="msr-edit msr-picking ${stateSelectClass("picking",s.status||"Pendiente")}" data-msr-id="${esc(o.id)}" data-msr-field="status">${pickingOptions(s.status||"Pendiente")}</select></td>
       <td class="wrap msr-description">${esc(o.description||"")}</td>
-      <td>${esc(o.store||"")}</td>
+      <td class="wrap">${esc(o.store||"")}</td>
       <td><select class="msr-edit msr-select ${stateSelectClass("shipping",s.shipping||"No")}" data-msr-id="${esc(o.id)}" data-msr-field="shipping">${shippingOptions(s.shipping||"No")}</select></td>
       <td><input class="msr-edit msr-date" type="date" data-msr-id="${esc(o.id)}" data-msr-field="date" value="${esc(s.date||"")}"></td>
       <td><input class="msr-edit msr-time" type="time" data-msr-id="${esc(o.id)}" data-msr-field="time" value="${esc(s.time||"")}"></td>
@@ -1065,95 +1129,47 @@
 
   function renderResumen(){
     let rows=orderRows();
-
     if(summaryDateFilter!=="all")rows=rows.filter(({o})=>o.planDate===summaryDateFilter);
     if(summaryShippingFilter!=="all")rows=rows.filter(({s})=>(s.shipping||"No")===summaryShippingFilter);
     if(summaryServalFilter!=="all")rows=rows.filter(({s})=>(s.serval||"No")===summaryServalFilter);
+    if(summaryPickingFilter!=="all")rows=rows.filter(({s})=>(s.status||"Pendiente")===summaryPickingFilter);
     if(summaryTextFilter){
       const q=norm(summaryTextFilter);
-      rows=rows.filter(({o,s})=>norm([o.id,o.description,o.store,s.comment].join(" ")).includes(q));
+      rows=rows.filter(({o,s})=>norm([o.id,o.description,o.store,s.comment,s.status].join(" ")).includes(q));
     }
     rows=sortSummaryRows(rows);
-
     const dates=[...new Set(db.msr.map(o=>o.planDate).filter(Boolean))].sort();
+    const totalFiltered=rows.length;
+    const maxPage=Math.max(1,Math.ceil(totalFiltered/summaryPageSize));
+    if(summaryPage>maxPage)summaryPage=maxPage;
+    const visibleRows=rows.slice((summaryPage-1)*summaryPageSize,summaryPage*summaryPageSize);
 
     content.innerHTML=`
       <div class="panel" style="margin-top:0">
         <div class="panel-head">
-          <div>
-            <h2>Resumen MSR</h2>
-            <p>${rows.length} órdenes visibles de ${db.msr.length}. Los cambios se guardan automáticamente.</p>
-          </div>
-          <div class="actions">
-            <button class="btn primary" id="addManualMSRBtn">➕ Añadir ID manual</button>
-            <button class="btn ghost" id="resetSummaryFilters">Limpiar filtros</button>
-            <button class="btn danger-soft" id="clearMSRBtn">🧹 Limpiar MSR</button>
-          </div>
+          <div><h2>📊 Resumen MSR</h2><p>${totalFiltered} órdenes visibles de ${db.msr.length}. Los cambios se guardan automáticamente y se sincronizan en línea.</p></div>
+          <div class="actions"><button class="btn primary" id="addManualMSRBtn">➕ Añadir ID manual</button><button class="btn ghost" id="resetSummaryFilters">🧹 Limpiar filtros</button><button class="btn danger-soft" id="clearMSRBtn">🗑️ Vaciar MSR</button></div>
         </div>
         <div class="operational-help msr-help">
-          <div class="help-title">🚚 ¿Qué significa Envío?</div>
+          <div class="help-title">🧭 Guía rápida MSR</div>
           <div class="help-items">
+            <span class="help-item info"><b>📦 Picking</b><small>Pendiente → En proceso → Finalizado.</small></span>
             <span class="help-item neutral"><b>⏳ No enviado</b><small>No ha salido mercancía de esta ID.</small></span>
             <span class="help-item partial"><b>🟠 Parcial</b><small>Ha salido una parte; queda resto pendiente.</small></span>
             <span class="help-item total"><b>✅ Total</b><small>Pedido completo enviado; no queda resto.</small></span>
-            <span class="help-item serval"><b>🚨 Serval</b><small>Incidencia especial; comentario obligatorio.</small></span>
           </div>
         </div>
-        <div class="memory-note">
-          <strong>💾 Memoria de estados activa</strong>
-          <span>Al limpiar MSR se borran solo las órdenes visibles. Los estados de cada Código se conservan y se recuperan si esa ID vuelve a aparecer en una importación futura.</span>
-          <span class="memory-count">${Object.keys(db.states).length} IDs guardadas</span>
+        <div class="simple-filter-grid summary-filters">
+          <label>Fecha<select id="summaryDateFilter" class="filter-input"><option value="all">📅 Todas</option>${dates.map(d=>`<option value="${esc(d)}" ${summaryDateFilter===d?"selected":""}>${fmtDate(d)}</option>`).join("")}</select></label>
+          <label>Picking<select id="summaryPickingFilter" class="filter-input"><option value="all" ${summaryPickingFilter==="all"?"selected":""}>📦 Todos</option><option value="Pendiente" ${summaryPickingFilter==="Pendiente"?"selected":""}>📦 Pendiente</option><option value="En proceso" ${summaryPickingFilter==="En proceso"?"selected":""}>🔄 En proceso</option><option value="Finalizado" ${summaryPickingFilter==="Finalizado"?"selected":""}>✅ Finalizado</option></select></label>
+          <label>Envío<select id="summaryShippingFilter" class="filter-input"><option value="all" ${summaryShippingFilter==="all"?"selected":""}>🚚 Todos</option><option value="No" ${summaryShippingFilter==="No"?"selected":""}>⏳ No enviado</option><option value="Parcial" ${summaryShippingFilter==="Parcial"?"selected":""}>🟠 Parcial</option><option value="Total" ${summaryShippingFilter==="Total"?"selected":""}>✅ Total</option></select></label>
+          <label>Serval<select id="summaryServalFilter" class="filter-input"><option value="all" ${summaryServalFilter==="all"?"selected":""}>⚠️ Todos</option><option value="No" ${summaryServalFilter==="No"?"selected":""}>No</option><option value="Si" ${summaryServalFilter==="Si"?"selected":""}>🚨 Sí</option></select></label>
+          <label>Buscar<input id="summaryTextFilter" class="filter-input" placeholder="Código, orden, tienda..." value="${esc(summaryTextFilter)}"></label>
+          <label>Ordenar<select id="summarySortKey" class="filter-input"><option value="planDateTime" ${summarySortKey==="planDateTime"?"selected":""}>Fecha prevista</option><option value="id" ${summarySortKey==="id"?"selected":""}>Código</option><option value="store" ${summarySortKey==="store"?"selected":""}>Tienda</option><option value="shipping" ${summarySortKey==="shipping"?"selected":""}>Envío</option><option value="sendDateTime" ${summarySortKey==="sendDateTime"?"selected":""}>Expedición</option><option value="serval" ${summarySortKey==="serval"?"selected":""}>Serval</option></select></label>
+          <label>Dirección<select id="summarySortDir" class="filter-input"><option value="asc" ${summarySortDir==="asc"?"selected":""}>↑ Ascendente</option><option value="desc" ${summarySortDir==="desc"?"selected":""}>↓ Descendente</option></select></label>
         </div>
-
-        <div class="simple-filter-grid">
-          <label>Fecha
-            <select id="summaryDateFilter" class="filter-input">
-              <option value="all">📅 Todas las fechas</option>
-              ${dates.map(d=>`<option value="${esc(d)}" ${summaryDateFilter===d?"selected":""}>${fmtDate(d)}</option>`).join("")}
-            </select>
-          </label>
-
-          <label>Envío
-            <select id="summaryShippingFilter" class="filter-input">
-              <option value="all" ${summaryShippingFilter==="all"?"selected":""}>🚚 Todos</option>
-              <option value="No" ${summaryShippingFilter==="No"?"selected":""}>No</option>
-              <option value="Parcial" ${summaryShippingFilter==="Parcial"?"selected":""}>Parcial</option>
-              <option value="Total" ${summaryShippingFilter==="Total"?"selected":""}>Total</option>
-            </select>
-          </label>
-
-          <label>Serval
-            <select id="summaryServalFilter" class="filter-input">
-              <option value="all" ${summaryServalFilter==="all"?"selected":""}>⚠️ Todos</option>
-              <option value="No" ${summaryServalFilter==="No"?"selected":""}>No</option>
-              <option value="Si" ${summaryServalFilter==="Si"?"selected":""}>Sí</option>
-            </select>
-          </label>
-
-          <label>Buscar
-            <input id="summaryTextFilter" class="filter-input" placeholder="Código, orden, tienda..." value="${esc(summaryTextFilter)}">
-          </label>
-
-          <label>Ordenar por
-            <select id="summarySortKey" class="filter-input">
-              <option value="planDateTime" ${summarySortKey==="planDateTime"?"selected":""}>Fecha prevista</option>
-              <option value="id" ${summarySortKey==="id"?"selected":""}>Código</option>
-              <option value="store" ${summarySortKey==="store"?"selected":""}>Tienda</option>
-              <option value="shipping" ${summarySortKey==="shipping"?"selected":""}>Envío</option>
-              <option value="sendDateTime" ${summarySortKey==="sendDateTime"?"selected":""}>Fecha/hora expedición</option>
-              <option value="serval" ${summarySortKey==="serval"?"selected":""}>Serval</option>
-            </select>
-          </label>
-
-          <label>Dirección
-            <select id="summarySortDir" class="filter-input">
-              <option value="asc" ${summarySortDir==="asc"?"selected":""}>Ascendente</option>
-              <option value="desc" ${summarySortDir==="desc"?"selected":""}>Descendente</option>
-            </select>
-          </label>
-        </div>
-
-        <div class="table-wrap">${tableOrders(rows)}</div>
+        <div class="table-wrap operational-table-wrap">${tableOrders(visibleRows)}</div>
+        ${pagerHtml("summary",summaryPage,summaryPageSize,totalFiltered)}
       </div>`;
   }
 
@@ -1679,6 +1695,7 @@
         <label>Hora prevista<input id="aePlanTime" type="time" value="${esc(o.planTime||"")}"></label>
         <label>Estado importado<input id="aeSourceStatus" value="${esc(o.sourceStatus||"")}"></label>
         <label>Cadena<input id="aeChain" value="${esc(o.chain||"")}"></label>
+        <label>Picking<select id="aePicking">${pickingOptions(s.status||"Pendiente")}</select></label>
         <label>Envío<select id="aeShipping">${shippingOptions(s.shipping||"No")}</select></label>
         <label>Fecha expedición<input id="aeDate" type="date" value="${esc(s.date||"")}"></label>
         <label>Hora expedición<input id="aeTime" type="time" value="${esc(s.time||"")}"></label>
@@ -1747,6 +1764,7 @@
       const serval=document.querySelector("#aeServal").value;
       const comment=document.querySelector("#aeComment").value.trim();
       if(serval==="Si"&&!comment){toast("🚨 Serval = Sí requiere comentario obligatorio",true);return;}
+      const picking=document.querySelector("#aePicking").value;
       const shipping=document.querySelector("#aeShipping").value;
       const date=document.querySelector("#aeDate").value;
       const time=document.querySelector("#aeTime").value;
@@ -1761,7 +1779,7 @@
       o.planTime=document.querySelector("#aePlanTime").value;
       o.sourceStatus=document.querySelector("#aeSourceStatus").value.trim();
       o.chain=document.querySelector("#aeChain").value.trim();
-      s.shipping=shipping;s.date=date;s.time=time;s.serval=serval;s.comment=comment;s.updatedAt=nowISO();
+      s.status=picking;s.shipping=shipping;s.date=date;s.time=time;s.serval=serval;s.comment=comment;s.updatedAt=nowISO();
       logAudit("msr",id,"Edición completa admin",{before:beforeAdmin,after:{order:{...o},state:{...s}}},"admin");
       save();toast("✅ Línea MSR corregida y guardada");renderMsrAdminEditor(id);
     };
