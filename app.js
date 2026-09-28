@@ -108,17 +108,24 @@
     if(p && new Date()>p) return "RETRASO";
     return "PENDIENTE";
   }
+  function exactDurationLabel(ms){
+    const total=Math.round(Math.abs(ms)/60000);
+    const h=Math.floor(total/60),m=total%60;
+    return h?`${h} h ${m} min`:`${m} min`;
+  }
+
   function timing(o,s){
     const p=plannedFor(o), a=actualFor(o,s);
-    if(!p)return "SIN PREVISIÓN";
+    if(!p)return "⚪ SIN PREVISIÓN";
     const ref=a||new Date();
-    const h=(ref-p)/36e5;
+    const diff=ref-p;
+    const label=exactDurationLabel(diff);
     if(a){
-      if(h<=0)return `A TIEMPO · ${Math.abs(h).toFixed(1)} h antes`;
-      return `TARDE · ${h.toFixed(1)} h`;
+      if(diff<=0)return `🟢 A TIEMPO · ${label} antes`;
+      return `🔴 TARDE · ${label}`;
     }
-    if(h>0)return `RETRASO · ${h.toFixed(1)} h`;
-    return `FALTAN ${Math.abs(h).toFixed(1)} h`;
+    if(diff>0)return `🔴 RETRASO · ${label}`;
+    return `🔵 FALTAN · ${label}`;
   }
 
   function msrTimeBadge(o,s){
@@ -204,88 +211,115 @@
     const hce=db.hce.filter(x=>inDashboardRange(x.planDate))
       .sort((a,b)=>(`${a.planDate}${a.planTime}`).localeCompare(`${b.planDate}${b.planTime}`));
 
-    const msrPending=msr.filter(({s})=>(s.status||"Pendiente")==="Pendiente").length;
-    const msrProcess=msr.filter(({s})=>(s.status||"Pendiente")==="En proceso").length;
-    const msrDone=msr.filter(({s})=>(s.status||"Pendiente")==="Finalizado").length;
-    const msrLate=msr.filter(({o,s})=>["RETRASO","TARDE"].some(x=>timing(o,s).startsWith(x))).length;
+    const msrNo=msr.filter(({s})=>(s.shipping||"No")==="No").length;
+    const msrPartial=msr.filter(({s})=>(s.shipping||"No")==="Parcial").length;
+    const msrTotal=msr.filter(({s})=>(s.shipping||"No")==="Total").length;
+    const msrServal=msr.filter(({s})=>(s.serval||"No")==="Si").length;
+    const msrLate=msr.filter(({o,s})=>timing(o,s).includes("RETRASO")||timing(o,s).includes("TARDE")).length;
 
     const hcePending=hce.filter(x=>!(x.realDate&&x.realTime)).length;
     const hceOnTime=hce.filter(x=>x.realDate&&x.realTime&&hceTiming(x).hours<=0).length;
     const hceLate=hce.filter(x=>x.realDate&&x.realTime&&hceTiming(x).hours>0).length;
+    const hceDownloading=hce.filter(x=>x.process==="Descargando").length;
+    const hceDone=hce.filter(x=>x.process==="Descargado").length;
+
+    const alerts=[];
+    if(msrLate)alerts.push(`🔴 ${msrLate} orden(es) MSR con retraso`);
+    if(msrPartial)alerts.push(`🟠 ${msrPartial} envío(s) parcial(es)`);
+    if(msrServal)alerts.push(`⚠️ ${msrServal} orden(es) con Serval`);
+    if(hceLate)alerts.push(`🚨 ${hceLate} contenedor(es) llegaron tarde`);
+    if(hcePending)alerts.push(`⏳ ${hcePending} contenedor(es) pendientes de llegada`);
+
+    const rangeLabel=dashboardDateFrom||dashboardDateTo
+      ? `${dashboardDateFrom?fmtDate(dashboardDateFrom):"Inicio"} → ${dashboardDateTo?fmtDate(dashboardDateTo):"Actualidad"}`
+      : "Todas las fechas";
 
     content.innerHTML=`
       <div class="dashboard-toolbar no-capture">
         <div class="dashboard-filters">
           <div class="dashboard-date-group">
-            <label>Desde
-              <input id="dashboardDateFrom" class="filter-input modern-control" type="date" value="${esc(dashboardDateFrom)}">
-            </label>
-            <label>Hasta
-              <input id="dashboardDateTo" class="filter-input modern-control" type="date" value="${esc(dashboardDateTo)}">
-            </label>
+            <label>Desde<input id="dashboardDateFrom" class="filter-input modern-control" type="date" value="${esc(dashboardDateFrom)}"></label>
+            <label>Hasta<input id="dashboardDateTo" class="filter-input modern-control" type="date" value="${esc(dashboardDateTo)}"></label>
           </div>
           <div class="dashboard-quick">
-            <button class="btn chip blue" id="dashboardToday">Hoy</button>
-            <button class="btn chip violet" id="dashboardYesterday">Ayer</button>
-            <button class="btn chip amber" id="dashboard48h">Últimas 48 h</button>
-            <button class="btn chip slate" id="dashboardAll">Todas</button>
+            <button class="btn chip blue" id="dashboardToday">📅 Hoy</button>
+            <button class="btn chip violet" id="dashboardYesterday">↩️ Ayer</button>
+            <button class="btn chip amber" id="dashboard48h">⏱️ 48 h</button>
+            <button class="btn chip slate" id="dashboardAll">🗂️ Todas</button>
           </div>
           <div class="dashboard-actions">
-            <button class="btn success" id="captureModeBtn">📸 Modo captura</button>
-            <button class="btn primary" id="printDashboardBtn">🖨 Imprimir / PDF</button>
+            <button class="btn success" id="captureModeBtn">🖼️ Vista captura</button>
+            <button class="btn primary" id="saveDashboardImageBtn">📸 Guardar PNG</button>
+            <button class="btn violet" id="printDashboardBtn">📄 PDF</button>
           </div>
         </div>
       </div>
 
-      <section class="report-card">
+      <section class="report-card" id="operationalReport">
         <div class="report-head">
-          <div><div class="eyebrow">PARTE OPERATIVO · MSR / HCE</div><h2>${dashboardDateFrom||dashboardDateTo ? `${dashboardDateFrom?fmtDate(dashboardDateFrom):"Inicio"} → ${dashboardDateTo?fmtDate(dashboardDateTo):"Actualidad"}` : "Todas las fechas"}</h2></div>
-          <div class="report-updated">Actualizado ${new Date().toLocaleString("es-ES")}</div>
+          <div>
+            <div class="eyebrow">📦 PARTE OPERATIVO · MSR / HCE</div>
+            <h2>${rangeLabel}</h2>
+            <div class="report-sub">Estado operativo actualizado en tiempo real</div>
+          </div>
+          <div class="report-updated">🕒 ${new Date().toLocaleString("es-ES")}</div>
         </div>
 
-        <div class="section-title">Órdenes MSR</div>
-        <div class="grid report-kpis">
-          ${kpi("Órdenes",msr.length,"Total")}
-          ${kpi("Pendientes",msrPending,"Reparto")}
-          ${kpi("En proceso",msrProcess,"Reparto")}
-          ${kpi("Finalizadas",msrDone,"Reparto")}
-          ${kpi("Con retraso",msrLate,"Cumplimiento")}
+        <div class="report-alerts ${alerts.length?"has-alerts":"all-clear"}">
+          <strong>${alerts.length?"🚨 Avisos que requieren atención":"✅ Sin alertas destacadas"}</strong>
+          <div>${alerts.length?alerts.map(x=>`<span>${esc(x)}</span>`).join(""):"Todo está dentro de los parámetros visibles para este periodo."}</div>
         </div>
+
+        <div class="section-title">📋 Órdenes MSR</div>
+        <div class="grid report-kpis visual-kpis">
+          ${kpi("📦 Órdenes",msr.length,"Total del periodo")}
+          ${kpi("⏳ Sin enviar",msrNo,"Envío = No")}
+          ${kpi("🟠 Parciales",msrPartial,"Revisar continuidad")}
+          ${kpi("✅ Totales",msrTotal,"Expedidas")}
+          ${kpi("⚠️ Serval",msrServal,"Requieren comentario")}
+          ${kpi("🔴 Retraso",msrLate,"Fuera de hora")}
+        </div>
+
         <div class="table-wrap report-table">
-          <table class="data-table">
-            <thead><tr><th>Cumplimiento</th><th>ID</th><th>Descripción</th><th>Estado reparto</th><th>Envío</th><th>Expedición</th><th>Serval</th><th>Comentario</th></tr></thead>
+          <table class="data-table report-data-table">
+            <thead><tr><th>⏱ Cumplimiento</th><th>🔢 Código</th><th>📝 Orden de trabajo</th><th>🏬 Tienda</th><th>🚚 Envío</th><th>🕒 Expedición</th><th>⚠️ Serval</th><th>💬 Comentario</th></tr></thead>
             <tbody>${msr.length?msr.map(({o,s})=>`<tr class="${s.serval==="Si"?"serval-alert":""}">
               <td>${msrTimeBadge(o,s)}</td>
               <td><strong>${esc(o.id)}</strong></td>
               <td class="wrap">${esc(o.description||"")}</td>
-              <td>${badge(s.status||"Pendiente")}</td>
+              <td>${esc(o.store||"")}</td>
               <td>${badge(s.shipping||"No")}</td>
               <td>${s.date?`${fmtDate(s.date)} · ${fmtTime(s.time)}`:"—"}</td>
               <td>${badge(s.serval||"No")}</td>
               <td class="wrap">${esc(s.comment||"")}</td>
-            </tr>`).join(""):`<tr><td colspan="8" class="empty">Sin órdenes para esta fecha.</td></tr>`}</tbody>
+            </tr>`).join(""):`<tr><td colspan="8" class="empty">No hay órdenes MSR en este periodo.</td></tr>`}</tbody>
           </table>
         </div>
 
-        <div class="section-title hce-title">Contenedores HCE</div>
-        <div class="grid report-kpis hce-kpis">
-          ${kpi("Contenedores",hce.length,"Previstos")}
-          ${kpi("Pendientes",hcePending,"Sin llegada")}
-          ${kpi("A tiempo",hceOnTime,"Llegados")}
-          ${kpi("Tarde",hceLate,"Llegados")}
+        <div class="section-title hce-title">🚛 Contenedores HCE</div>
+        <div class="grid report-kpis hce-kpis visual-kpis">
+          ${kpi("🚛 Contenedores",hce.length,"Total del periodo")}
+          ${kpi("⏳ Pendientes",hcePending,"Sin llegada")}
+          ${kpi("🟢 A tiempo",hceOnTime,"Llegaron antes/en hora")}
+          ${kpi("🔴 Tarde",hceLate,"Llegaron fuera de hora")}
+          ${kpi("🔄 Descargando",hceDownloading,"En proceso")}
+          ${kpi("✅ Descargados",hceDone,"Finalizados")}
         </div>
+
         <div class="table-wrap report-table">
-          <table class="data-table">
-            <thead><tr><th>Cumplimiento</th><th>Matrícula</th><th>Previsto</th><th>Llegada</th><th>Estado</th></tr></thead>
+          <table class="data-table report-data-table">
+            <thead><tr><th>⏱ Cumplimiento</th><th>🚛 Matrícula</th><th>📅 Previsto</th><th>📥 Llegada</th><th>📌 Estado</th></tr></thead>
             <tbody>${hce.length?hce.map(x=>`<tr>
               <td>${timeBadge(hceTiming(x))}</td>
               <td><strong>${esc(x.number||x.entryId)}</strong></td>
               <td>${fmtDate(x.planDate)} · ${fmtTime(x.planTime)}</td>
               <td>${x.realDate?`${fmtDate(x.realDate)} · ${fmtTime(x.realTime)}`:"—"}</td>
               <td>${badge(x.process||"Pendiente de recibir")}</td>
-            </tr>`).join(""):`<tr><td colspan="5" class="empty">Sin contenedores para esta fecha.</td></tr>`}</tbody>
+            </tr>`).join(""):`<tr><td colspan="5" class="empty">No hay contenedores HCE en este periodo.</td></tr>`}</tbody>
           </table>
         </div>
+
+        <div class="report-footer">MSR · HCE Control · Parte generado ${new Date().toLocaleString("es-ES")}</div>
       </section>`;
   }
   function kpi(label,value,hint){return `<div class="kpi"><small>${label}</small><strong>${esc(value)}</strong><div class="hint">${hint}</div></div>`}
@@ -435,16 +469,17 @@
 
   function hceTiming(c){
     const p=dt(c.planDate,c.planTime);
-    if(!p)return {label:"SIN PREVISIÓN",hours:null,kind:"gray"};
+    if(!p)return {label:"⚪ SIN PREVISIÓN",hours:null,kind:"gray"};
     const a=dt(c.realDate,c.realTime);
     const ref=a||new Date();
-    const h=(ref-p)/36e5;
+    const diff=ref-p;
+    const label=exactDurationLabel(diff);
     if(a){
-      if(h<=0)return {label:`A TIEMPO · ${Math.abs(h).toFixed(1)} h antes`,hours:h,kind:"green"};
-      return {label:`TARDE · ${h.toFixed(1)} h`,hours:h,kind:"red"};
+      if(diff<=0)return {label:`🟢 A TIEMPO · ${label} antes`,hours:diff/36e5,kind:"green"};
+      return {label:`🔴 TARDE · ${label}`,hours:diff/36e5,kind:"red"};
     }
-    if(h>0)return {label:`RETRASO · ${h.toFixed(1)} h`,hours:h,kind:"red"};
-    return {label:`FALTAN ${Math.abs(h).toFixed(1)} h`,hours:h,kind:"blue"};
+    if(diff>0)return {label:`🔴 RETRASO · ${label}`,hours:diff/36e5,kind:"red"};
+    return {label:`🔵 FALTAN · ${label}`,hours:diff/36e5,kind:"blue"};
   }
 
   function timeBadge(info){
@@ -683,6 +718,19 @@
     const dall=$("#dashboardAll"); if(dall)dall.onclick=()=>{dashboardDateFrom="";dashboardDateTo="";render()};
     const capture=$("#captureModeBtn"); if(capture)capture.onclick=()=>document.body.classList.toggle("capture-mode");
     const printBtn=$("#printDashboardBtn"); if(printBtn)printBtn.onclick=()=>window.print();
+    const saveImg=$("#saveDashboardImageBtn"); if(saveImg)saveImg.onclick=async()=>{
+      const report=$("#operationalReport");
+      if(!report||!window.html2canvas){toast("No se puede generar la imagen ahora",true);return;}
+      try{
+        toast("Generando imagen...");
+        const canvas=await window.html2canvas(report,{scale:2,backgroundColor:"#ffffff",useCORS:true});
+        const a=document.createElement("a");
+        a.download=`parte-operativo-${today()}.png`;
+        a.href=canvas.toDataURL("image/png");
+        a.click();
+        toast("📸 Imagen PNG generada");
+      }catch(e){console.warn(e);toast("Error al generar PNG",true);}
+    };
 
     const hf=$("#hceDateFrom"); if(hf)hf.onchange=()=>{hceDateFrom=hf.value;render()};
     const ht=$("#hceDateTo"); if(ht)ht.onchange=()=>{hceDateTo=ht.value;render()};
