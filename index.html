@@ -35,7 +35,7 @@
 
       <div class="sidebar-footer">
         <span class="dot ok"></span>
-        <small>Datos guardados en este navegador</small>
+        <small>Control operativo MSR / HCE</small>
       </div>
     </aside>
 
@@ -57,39 +57,5 @@
     </main>
   </div>
 
-  <dialog id="containerDialog" class="dialog">
-    <form method="dialog">
-      <div class="dialog-head">
-        <div><small>Ficha HCE</small><h2 id="containerDialogTitle">Contenedor</h2></div>
-        <button class="icon-btn" value="cancel" aria-label="Cerrar">✕</button>
-      </div>
-      <div class="form-grid">
-        <label>Contenedor / matrícula<input id="c-number" type="text" readonly></label>
-        <label>ID entrada<input id="c-entry" type="text" readonly></label>
-        <label>Fecha prevista<input id="c-plan-date" type="date" readonly></label>
-        <label>Hora prevista<input id="c-plan-time" type="time" readonly></label>
-        <label>Cantidad planificada<input id="c-plan-qty" type="number" readonly></label>
-        <label>Transportista<input id="c-transporter" type="text" readonly></label>
-        <label>Fecha real<input id="c-real-date" type="date"></label>
-        <label>Hora real<input id="c-real-time" type="time"></label>
-        <label>Proceso
-          <select id="c-process">
-            <option>Pendiente de recibir</option><option>Posicionado</option>
-            <option>Descargando</option><option>Descargado</option>
-          </select>
-        </label>
-        <label>Muelle<input id="c-dock" type="text"></label>
-        <label>Matriculado<select id="c-registered"><option>No</option><option>Si</option></select></label>
-        <label>Ubicado<select id="c-located"><option>No</option><option>En proceso</option><option>Si</option></select></label>
-        <label>5%<select id="c-five"><option>No</option><option>En proceso</option><option>Si</option></select></label>
-        <label>Muestra<select id="c-sample"><option>Pendiente de sacar</option><option>No solicitada</option><option>Sacada</option></select></label>
-        <label class="span-2">Comentario<textarea id="c-comment" rows="3"></textarea></label>
-      </div>
-      <div class="dialog-actions">
-        <button class="btn ghost" value="cancel">Cancelar</button>
-        <button type="button" class="btn primary" id="saveContainerBtn">💾 Guardar</button>
-      </div>
-    </form>
-  </dialog>
 </body>
 </html>
