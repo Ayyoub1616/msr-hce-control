@@ -54,38 +54,6 @@
     </main>
   </div>
 
-  <dialog id="stateDialog" class="dialog">
-    <form method="dialog" id="stateForm">
-      <div class="dialog-head">
-        <div><small>Ficha de reparto</small><h2 id="stateDialogTitle">ID</h2></div>
-        <button class="icon-btn" value="cancel" aria-label="Cerrar">✕</button>
-      </div>
-      <div class="form-grid">
-        <label>ID<input id="f-id" type="text" inputmode="numeric" readonly></label>
-        <label>Estado reparto
-          <select id="f-status">
-            <option>Pendiente</option><option>En proceso</option><option>Finalizado</option>
-          </select>
-        </label>
-        <label>Fecha envío<input id="f-date" type="date"></label>
-        <label>Hora envío<input id="f-time" type="time"></label>
-        <label>Envío
-          <select id="f-shipping"><option>No</option><option>Parcial</option><option>Total</option></select>
-        </label>
-        <label>Pallets total<input id="f-total" type="number" min="0" step="1"></label>
-        <label>Pallets enviados<input id="f-sent" type="number" min="0" step="1"></label>
-        <label>Quedan<input id="f-left" type="number" readonly></label>
-        <label>Serval<select id="f-serval"><option>No</option><option>Si</option></select></label>
-        <label class="span-2">Comentario<textarea id="f-comment" rows="3"></textarea></label>
-        <label class="span-2">Nota<textarea id="f-note" rows="2"></textarea></label>
-      </div>
-      <div class="dialog-actions">
-        <button class="btn ghost" value="cancel">Cancelar</button>
-        <button type="button" class="btn primary" id="saveStateBtn">💾 Guardar</button>
-      </div>
-    </form>
-  </dialog>
-
   <dialog id="containerDialog" class="dialog">
     <form method="dialog">
       <div class="dialog-head">
