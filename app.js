@@ -352,6 +352,16 @@
         <div class="report-footer">MSR · HCE Control · Parte generado ${new Date().toLocaleString("es-ES")}</div>
       </section>`;
   }
+  function stampReportNow(){
+    const now=new Date();
+    const label=now.toLocaleString("es-ES");
+    const head=document.querySelector("#operationalReport .report-updated");
+    const foot=document.querySelector("#operationalReport .report-footer");
+    if(head)head.textContent=`🕒 Generado / actualizado: ${label}`;
+    if(foot)foot.textContent=`MSR · HCE Control · Informe generado: ${label}`;
+    return label;
+  }
+
   function kpi(label,value,hint){return `<div class="kpi"><small>${label}</small><strong>${esc(value)}</strong><div class="hint">${hint}</div></div>`}
 
   function orderRows(){
@@ -978,15 +988,17 @@
     };
     const dall=$("#dashboardAll"); if(dall)dall.onclick=()=>{dashboardDateFrom="";dashboardDateTo="";render()};
     const capture=$("#captureModeBtn"); if(capture)capture.onclick=()=>{
+      stampReportNow();
       document.body.classList.add("capture-mode");
       window.scrollTo({top:0,behavior:"smooth"});
     };
     const exitCapture=$("#exitCaptureBtn"); if(exitCapture)exitCapture.onclick=()=>document.body.classList.remove("capture-mode");
-    const printBtn=$("#printDashboardBtn"); if(printBtn)printBtn.onclick=()=>window.print();
+    const printBtn=$("#printDashboardBtn"); if(printBtn)printBtn.onclick=()=>{stampReportNow();window.print();};
     const saveImg=$("#saveDashboardImageBtn"); if(saveImg)saveImg.onclick=async()=>{
       const report=$("#operationalReport");
       if(!report||!window.html2canvas){toast("No se puede generar la imagen ahora",true);return;}
       try{
+        stampReportNow();
         toast("Generando imagen...");
         const canvas=await window.html2canvas(report,{scale:2,backgroundColor:"#ffffff",useCORS:true});
         const a=document.createElement("a");
