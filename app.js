@@ -5,6 +5,15 @@
   const STORAGE_KEY = "msr_hce_control_v1";
   const ADMIN_UNDO_KEY = "msr_hce_admin_undo_v1";
   const CLOUD_CONFLICT_KEY = "msr_hce_cloud_conflict_v1";
+  const DEVICE_ID_KEY = "msr_hce_device_id_v1";
+  const DEVICE_ID = (() => {
+    let id=localStorage.getItem(DEVICE_ID_KEY);
+    if(!id){
+      id=(crypto.randomUUID?.()||`dev_${Date.now()}_${Math.random().toString(36).slice(2)}`);
+      localStorage.setItem(DEVICE_ID_KEY,id);
+    }
+    return id;
+  })();
   const VERSION = 1;
   const defaultData = () => ({
     version: VERSION,
@@ -32,6 +41,7 @@
   let summaryPageSize = 25;
   let dashboardDateFrom = today();
   let dashboardDateTo = today();
+  let dashboardRolling48 = false;
   let hceDateFrom = "";
   let hceDateTo = "";
   let hceProcessFilter = "all";
@@ -83,6 +93,8 @@
   }
   function saveLocalOnly(){
     db.meta.updatedAt=new Date().toISOString();
+    db.meta.writerId=DEVICE_ID;
+    db.meta.revision=(Number(db.meta.revision)||0)+1;
     localStorage.setItem(STORAGE_KEY,JSON.stringify(db));
     window.dispatchEvent(new CustomEvent("msr-data-changed"));
   }
@@ -117,6 +129,8 @@
 
   function save() {
     db.meta.updatedAt = new Date().toISOString();
+    db.meta.writerId=DEVICE_ID;
+    db.meta.revision=(Number(db.meta.revision)||0)+1;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
     window.dispatchEvent(new CustomEvent("msr-data-changed"));
     const snapshot=JSON.parse(JSON.stringify(db));
@@ -239,23 +253,43 @@
     }
     syncing=true;renderSyncStatus();
     try{
-      const cloud=await window.MSRCloud.load();
+      const rawCloud=await window.MSRCloud.load();
+      const cloud=rawCloud?.version?normalizeData(rawCloud):null;
       const localTs=Date.parse(db?.meta?.updatedAt||0)||0;
       const cloudTs=Date.parse(cloud?.meta?.updatedAt||0)||0;
-      if(cloud?.version && cloudTs>localTs){
-        db=normalizeData(cloud);
+      const cloudDifferent=cloud && JSON.stringify(cloud)!==JSON.stringify(db);
+
+      if(pendingCloudSave && cloudDifferent && cloud?.meta?.writerId!==DEVICE_ID){
+        localStorage.setItem(CLOUD_CONFLICT_KEY,JSON.stringify({at:nowISO(),local:db,remote:cloud}));
+        cloudStatus="error";
+        lastSyncError="Cambios simultáneos detectados · revisa Admin > Nube/copias";
+        showEmployeePopup({
+          type:"warning",
+          title:"No se ha forzado la sincronización",
+          message:"Hay cambios locales pendientes y una copia distinta en la nube.",
+          details:["No se ha sobrescrito ninguna copia.","En Admin → Nube/copias puedes decidir cuál conservar."],
+          primaryText:"Entendido"
+        });
+        return;
+      }
+
+      if(cloud?.version && cloudTs>localTs && !pendingCloudSave){
+        db=cloud;
         localStorage.setItem(STORAGE_KEY,JSON.stringify(db));
         render();
         toast("☁️ Se descargó la versión más reciente");
       }else{
+        db.meta.writerId=DEVICE_ID;
         await window.MSRCloud.save(db);
         toast("☁️ Datos enviados y sincronizados");
       }
       pendingCloudSave=false;
       localStorage.removeItem("msr_hce_pending_sync");
+      clearCloudConflict();
       markCloudOnline();
     }catch(err){
       console.warn("Force sync",err);
+      recordAppError(err,"force-sync");
       markCloudError(err);
       toast("No se pudo sincronizar",true);
     }finally{
@@ -289,6 +323,49 @@
     if(p)p.onclick=()=>{close();if(onPrimary)onPrimary();};
     const s=overlay.querySelector("#employeePopupSecondary");
     if(s)s.onclick=()=>{close();if(onSecondary)onSecondary();};
+  }
+
+  function requestServalComment(id,previousServal="No"){
+    document.querySelector("#servalCommentModal")?.remove();
+    const s=stateFor(id);
+    const overlay=document.createElement("div");
+    overlay.id="servalCommentModal";
+    overlay.className="employee-popup-overlay";
+    overlay.innerHTML=`<div class="employee-popup error serval-comment-popup">
+      <div class="employee-popup-icon">🚨</div>
+      <div class="employee-popup-copy">
+        <div class="employee-popup-label">SERVAL</div>
+        <h3>Comentario obligatorio</h3>
+        <p>Explica brevemente la incidencia de la ID ${esc(id)}. Serval no quedará activado sin comentario.</p>
+        <textarea id="servalRequiredComment" class="serval-required-comment" rows="4" placeholder="Describe la incidencia…">${esc(s.comment||"")}</textarea>
+      </div>
+      <div class="employee-popup-actions">
+        <button class="btn ghost" id="servalCommentCancel">Cancelar</button>
+        <button class="btn danger" id="servalCommentSave">🚨 Activar Serval</button>
+      </div>
+    </div>`;
+    document.body.appendChild(overlay);
+    const cancel=()=>{
+      s.serval=previousServal||"No";
+      overlay.remove();
+      render();
+    };
+    overlay.querySelector("#servalCommentCancel").onclick=cancel;
+    overlay.querySelector("#servalCommentSave").onclick=()=>{
+      const comment=overlay.querySelector("#servalRequiredComment").value.trim();
+      if(!comment){
+        overlay.querySelector("#servalRequiredComment").classList.add("input-error");
+        return;
+      }
+      const old={serval:previousServal||"No",comment:s.comment||""};
+      s.serval="Si";s.comment=comment;s.updatedAt=nowISO();
+      logAudit("msr",id,"Serval activado",{from:old,to:{serval:"Si",comment}},"empleado");
+      save();
+      overlay.remove();
+      toast("🚨 Serval activado y comentario guardado");
+      render();
+    };
+    setTimeout(()=>overlay.querySelector("#servalRequiredComment")?.focus(),30);
   }
 
   function importIssueFix(issue,kind){
@@ -350,7 +427,10 @@
   function norm(s=""){return String(s).normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g," ").trim()}
   function idNorm(v){ const s=String(v??"").trim().replace(/^0+/,""); return s || String(v??"").trim(); }
   function nowISO(){return new Date().toISOString()}
-  function today(){return new Date().toISOString().slice(0,10)}
+  function today(){
+    const d=new Date();
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+  }
   function fmtDate(v){ if(!v)return ""; const s=String(v); if(/^\d{4}-\d{2}-\d{2}$/.test(s)){const [y,m,d]=s.split("-");return `${d}/${m}/${y}`} return s; }
   function fmtTime(v){ if(!v)return ""; return String(v).slice(0,5); }
   function dt(date,time){ if(!date)return null; const d=new Date(`${date}T${time||"00:00"}:00`); return isNaN(d)?null:d; }
@@ -431,6 +511,9 @@
       if(s.serval==="Si"&&!String(s.comment||"").trim()){
         problems.push({type:"msr",severity:"error",id:o.id,title:"Serval sin comentario",detail:o.description||""});
       }
+      if(Boolean(s.date)!==Boolean(s.time)){
+        problems.push({type:"msr",severity:"warning",id:o.id,title:"Expedición incompleta",detail:"Completa fecha y hora de expedición"});
+      }
       if(!o.planDate||!o.planTime){
         problems.push({type:"msr",severity:"warning",id:o.id,title:"Sin fecha/hora prevista",detail:o.description||""});
       }
@@ -441,6 +524,9 @@
       }
       if(!x.planDate||!x.planTime){
         problems.push({type:"hce",severity:"warning",id:x.number||x.entryId,title:"Sin fecha/hora prevista",detail:""});
+      }
+      if(Boolean(x.realDate)!==Boolean(x.realTime)){
+        problems.push({type:"hce",severity:"warning",id:x.number||x.entryId,title:"Llegada incompleta",detail:"Completa fecha y hora de llegada"});
       }
     });
     const r=db.meta?.lastImportReport;
@@ -732,15 +818,21 @@
   }
 
   function renderInicio(){
-    const inDashboardRange=d=>{
+    const inDashboardRange=(d,t="00:00")=>{
       if(!d)return false;
+      if(dashboardRolling48){
+        const point=dt(d,t);
+        if(!point)return false;
+        const now=Date.now();
+        return point.getTime()>=now-(48*60*60*1000) && point.getTime()<=now;
+      }
       if(dashboardDateFrom && d<dashboardDateFrom)return false;
       if(dashboardDateTo && d>dashboardDateTo)return false;
       return true;
     };
-    const msr=orderRows().filter(({o})=>inDashboardRange(o.planDate))
+    const msr=orderRows().filter(({o})=>inDashboardRange(o.planDate,o.planTime))
       .sort((a,b)=>(`${a.o.planDate}${a.o.planTime}`).localeCompare(`${b.o.planDate}${b.o.planTime}`));
-    const hce=db.hce.filter(x=>inDashboardRange(x.planDate))
+    const hce=db.hce.filter(x=>inDashboardRange(x.planDate,x.planTime))
       .sort((a,b)=>(`${a.planDate}${a.planTime}`).localeCompare(`${b.planDate}${b.planTime}`));
 
     const msrNo=msr.filter(({s})=>(s.shipping||"No")==="No").length;
@@ -765,7 +857,9 @@
     if(hceLate)alerts.push(`🚨 ${hceLate} contenedor(es) llegaron tarde`);
     if(hcePending)alerts.push(`⏳ ${hcePending} contenedor(es) pendientes de llegada`);
 
-    const rangeLabel=dashboardDateFrom||dashboardDateTo
+    const rangeLabel=dashboardRolling48
+      ?"Últimas 48 horas"
+      :dashboardDateFrom||dashboardDateTo
       ? `${dashboardDateFrom?fmtDate(dashboardDateFrom):"Inicio"} → ${dashboardDateTo?fmtDate(dashboardDateTo):"Actualidad"}`
       : "Todas las fechas";
     const detectedProblems=detectProblems();
@@ -1042,7 +1136,7 @@
         <label>Fecha prevista *<input id="mmDate" type="date"></label>
         <label>Hora prevista *<input id="mmTime" type="time"></label>
         <label>Cadena<input id="mmChain"></label>
-        <label>Estado origen<input id="mmSource" value="Manual"></label>
+        <label>Origen / estado de referencia<input id="mmSource" value="Manual"></label>
       </div>
       <div class="manual-entry-note">💾 Si esa ID aparece después en una importación, el sistema la detectará como existente/manual y conservará su estado operativo.</div>
       <div class="manual-entry-actions">
@@ -1384,11 +1478,7 @@
             </div>
             ${issueList.length?`
               <div class="issue-list">
-                ${issueList.slice(0,60).map(x=>`<div class="issue-item ${x.level}">
-                  <b>${x.level==="error"?"❌":"⚠️"} Línea ${x.line}</b>
-                  <span>${esc(x.message)}</span>
-                  ${x.value?`<code>${esc(x.value)}</code>`:""}
-                </div>`).join("")}
+                ${issueList.slice(0,60).map(x=>{const i=importIssueFix(x,kind);return `<div class="issue-item ${x.level}"><b>${x.level==="error"?"❌":"⚠️"} Línea ${i.line}</b><span><strong>${esc(i.problem)}</strong><small>→ ${esc(i.fix)}</small></span>${i.value?`<code>${esc(i.value)}</code>`:""}</div>`}).join("")}
                 ${issueList.length>60?`<div class="issue-more">… y ${issueList.length-60} incidencias más. Descarga el diagnóstico desde Datos / copias.</div>`:""}
               </div>`:"<div class=\"import-clean\">No se han detectado errores en las líneas importadas.</div>"}
             <div class="actions import-report-actions">
@@ -1742,7 +1832,7 @@
         <label>Nº OT carga<input id="aeLoadOT" value="${esc(o.loadOT||"")}"></label>
         <label>Fecha prevista<input id="aePlanDate" type="date" value="${esc(o.planDate||"")}"></label>
         <label>Hora prevista<input id="aePlanTime" type="time" value="${esc(o.planTime||"")}"></label>
-        <label>Estado importado<input id="aeSourceStatus" value="${esc(o.sourceStatus||"")}"></label>
+        <label>Estado del fichero (referencia)<input id="aeSourceStatus" value="${esc(o.sourceStatus||"")}"></label>
         <label>Cadena<input id="aeChain" value="${esc(o.chain||"")}"></label>
         <label>Picking<select id="aePicking">${pickingOptions(s.status||"Pendiente")}</select></label>
         <label>Envío<select id="aeShipping">${shippingOptions(s.shipping||"No")}</select></label>
@@ -2216,16 +2306,6 @@
           return;
         }
 
-        if((field==="date"||field==="time") && ((s.date&&!s.time)||(!s.date&&s.time))){
-          showEmployeePopup({
-            type:"warning",
-            title:"Expedición incompleta",
-            message:"La fecha y la hora deben informarse juntas.",
-            details:["Completa el dato que falta antes de continuar."],
-            primaryText:"Entendido"
-          });
-        }
-
         if(s.shipping==="No"&&(s.date||s.time)){
           showEmployeePopup({
             type:"warning",
@@ -2237,20 +2317,8 @@
         }
 
         if(field==="serval" && s.serval==="Si" && !String(s.comment||"").trim()){
-          const comment=prompt("🚨 Serval = Sí. Es obligatorio indicar el motivo/comentario:");
-          if(!comment||!String(comment).trim()){
-            s.serval=previous.serval||"No";
-            showEmployeePopup({
-              type:"error",
-              title:"Serval no activado",
-              message:"Serval = Sí necesita obligatoriamente un comentario.",
-              details:["Indica el motivo antes de activar Serval."],
-              primaryText:"Entendido"
-            });
-            render();
-            return;
-          }
-          s.comment=String(comment).trim();
+          requestServalComment(id,previous.serval||"No");
+          return;
         }
 
         if(field==="comment" && s.serval==="Si" && !String(s.comment||"").trim()){
@@ -2273,18 +2341,17 @@
       });
     });
 
-    const dfrom=$("#dashboardDateFrom"); if(dfrom)dfrom.onchange=()=>{dashboardDateFrom=dfrom.value;if(dashboardDateTo&&dashboardDateFrom>dashboardDateTo)dashboardDateTo=dashboardDateFrom;render()};
-    const dto=$("#dashboardDateTo"); if(dto)dto.onchange=()=>{dashboardDateTo=dto.value;if(dashboardDateFrom&&dashboardDateTo<dashboardDateFrom)dashboardDateFrom=dashboardDateTo;render()};
-    const dtoday=$("#dashboardToday"); if(dtoday)dtoday.onclick=()=>{dashboardDateFrom=today();dashboardDateTo=today();render()};
+    const dfrom=$("#dashboardDateFrom"); if(dfrom)dfrom.onchange=()=>{dashboardRolling48=false;dashboardDateFrom=dfrom.value;if(dashboardDateTo&&dashboardDateFrom>dashboardDateTo)dashboardDateTo=dashboardDateFrom;render()};
+    const dto=$("#dashboardDateTo"); if(dto)dto.onchange=()=>{dashboardRolling48=false;dashboardDateTo=dto.value;if(dashboardDateFrom&&dashboardDateTo<dashboardDateFrom)dashboardDateFrom=dashboardDateTo;render()};
+    const dtoday=$("#dashboardToday"); if(dtoday)dtoday.onclick=()=>{dashboardRolling48=false;dashboardDateFrom=today();dashboardDateTo=today();render()};
     const dy=$("#dashboardYesterday"); if(dy)dy.onclick=()=>{
       const d=new Date();d.setDate(d.getDate()-1);const y=d.toISOString().slice(0,10);
-      dashboardDateFrom=y;dashboardDateTo=y;render();
+      dashboardRolling48=false;dashboardDateFrom=y;dashboardDateTo=y;render();
     };
     const d48=$("#dashboard48h"); if(d48)d48.onclick=()=>{
-      const end=today();const d=new Date();d.setDate(d.getDate()-1);
-      dashboardDateFrom=d.toISOString().slice(0,10);dashboardDateTo=end;render();
+      dashboardRolling48=true;render();
     };
-    const dall=$("#dashboardAll"); if(dall)dall.onclick=()=>{dashboardDateFrom="";dashboardDateTo="";render()};
+    const dall=$("#dashboardAll"); if(dall)dall.onclick=()=>{dashboardRolling48=false;dashboardDateFrom="";dashboardDateTo="";render()};
     const printBtn=$("#printDashboardBtn"); if(printBtn)printBtn.onclick=()=>{
       stampReportNow();
       document.body.classList.add("pdf-print-mode");
@@ -2312,15 +2379,6 @@
         if(!item)return;
         const previous={...item};
         item[field]=el.value;
-
-        if((field==="realDate"||field==="realTime")&&((item.realDate&&!item.realTime)||(!item.realDate&&item.realTime))){
-          showEmployeePopup({
-            type:"warning",
-            title:"Llegada incompleta",
-            message:"Debes indicar Fecha llegada y Hora llegada.",
-            primaryText:"Entendido"
-          });
-        }
 
         if(item.realDate&&item.realTime&&(item.process==="Pendiente de recibir"||!item.process)){
           item.process="Posicionado";
@@ -2613,11 +2671,7 @@
         <span>${p.errors.length?"Puedes importar únicamente los registros correctos o cancelar para corregir el fichero.":"Revisa el comparador y confirma la importación."}</span>
       </div>
       ${issues.length?`<div class="issue-list import-preview-issues">
-        ${issues.slice(0,40).map(x=>`<div class="issue-item ${x.level}">
-          <b>${x.level==="error"?"❌":"⚠️"} Línea ${x.line}</b>
-          <span>${esc(x.message)}</span>
-          ${x.value?`<code>${esc(x.value)}</code>`:""}
-        </div>`).join("")}
+        ${issues.slice(0,40).map(x=>{const i=importIssueFix(x,p.kind);return `<div class="issue-item ${x.level}"><b>${x.level==="error"?"❌":"⚠️"} Línea ${i.line}</b><span><strong>${esc(i.problem)}</strong><small>→ ${esc(i.fix)}</small></span>${i.value?`<code>${esc(i.value)}</code>`:""}</div>`}).join("")}
         ${issues.length>40?`<div class="issue-more">… ${issues.length-40} incidencias adicionales</div>`:""}
       </div>`:""}
       <div class="import-preview-actions">
