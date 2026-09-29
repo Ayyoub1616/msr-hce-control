@@ -1360,3 +1360,31 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
   .memory-toolbar>*{width:100%}
   .file-doctor-actions .btn{width:100%}
 }
+
+/* MSR period filter v44 */
+.summary-period-panel{
+  margin:0 0 12px;padding:12px 14px;border:1px solid #bfdbfe;border-radius:14px;
+  background:linear-gradient(135deg,#f8fbff,#eff6ff)
+}
+.summary-period-title{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap
+}
+.summary-period-title>div:first-child strong,.summary-period-title>div:first-child small{display:block}
+.summary-period-title>div:first-child strong{font-size:12px;color:#1e3a8a}
+.summary-period-title>div:first-child small{font-size:10px;color:#64748b;margin-top:3px}
+.summary-period-presets{display:flex;gap:6px;flex-wrap:wrap}
+.summary-period-presets .btn{min-height:32px!important;padding:6px 10px!important;font-size:9px!important}
+.summary-period-inputs{
+  display:grid;grid-template-columns:minmax(150px,220px) 22px minmax(150px,220px);
+  gap:8px;align-items:end;margin-top:10px
+}
+.summary-period-inputs label{font-size:9px;font-weight:850;color:#475569}
+.summary-period-inputs input{margin-top:5px}
+.period-arrow{display:grid;place-items:center;height:36px;color:#64748b;font-weight:900}
+.summary-period-inputs input:disabled{background:#f1f5f9;color:#94a3b8;cursor:not-allowed}
+@media(max-width:650px){
+  .summary-period-presets{width:100%}
+  .summary-period-presets .btn{flex:1 1 95px}
+  .summary-period-inputs{grid-template-columns:1fr}
+  .period-arrow{display:none}
+}
