@@ -1531,6 +1531,227 @@
       </div>`;
   }
 
+  function memoryRowsHtml(){
+    const activeMap=new Map(db.msr.map(o=>[idNorm(o.id),o]));
+    const ids=Object.keys(db.states||{}).sort((a,b)=>String(a).localeCompare(String(b),"es",{numeric:true}));
+    if(!ids.length)return '<div class="history-empty">Todavía no hay IDs guardadas en memoria.</div>';
+    return `<div class="memory-table-wrap">
+      <table class="data-table memory-table">
+        <thead><tr><th>ID</th><th>Situación</th><th>Picking</th><th>Envío</th><th>Serval</th><th>Último cambio</th><th>Acción</th></tr></thead>
+        <tbody>${ids.map(id=>{
+          const s=stateFor(id),active=activeMap.get(id);
+          const search=norm([id,active?.description,active?.store,s.status,s.shipping,s.serval,s.comment].join(" "));
+          return `<tr class="${active?"memory-active":"memory-orphan"}" data-memory-row data-memory-search="${esc(search)}" data-memory-active="${active?"1":"0"}">
+            <td><strong>${esc(id)}</strong></td>
+            <td>${active?'<span class="memory-state active">🟢 Activa</span>':'<span class="memory-state orphan">💾 Solo memoria</span>'}</td>
+            <td>${pickingBadge(s.status||"Pendiente")}</td>
+            <td>${msrShippingBadge(s.shipping||"No")}</td>
+            <td>${servalBadge(s.serval||"No")}</td>
+            <td>${s.updatedAt?new Date(s.updatedAt).toLocaleString("es-ES"):"—"}</td>
+            <td><button class="btn ghost memory-open-btn" data-memory-open="${esc(id)}">✏️ Revisar</button></td>
+          </tr>`;
+        }).join("")}</tbody>
+      </table>
+    </div>`;
+  }
+
+  function renderMemoryAdminEditor(id){
+    const k=idNorm(id),s=db.states?.[k];
+    const target=document.querySelector("#adminEditorResult");
+    if(!target)return;
+    if(!s){
+      target.className="admin-editor-empty";
+      target.innerHTML=`<span>❌</span><strong>No existe memoria para la ID ${esc(k)}</strong>`;
+      return;
+    }
+    const active=db.msr.find(o=>idNorm(o.id)===k);
+    const history=(db.meta.auditLog||[]).filter(x=>x.entityType==="msr"&&idNorm(x.id)===k).slice(0,12);
+    target.className="admin-editor-card";
+    target.innerHTML=`
+      <div class="admin-editor-title">
+        <div><span>💾 MEMORIA MSR</span><h3>ID ${esc(k)}</h3><small>${active?"La ID está activa en el MSR actual.":"La ID no está activa; solo conserva su estado histórico."}</small></div>
+        <span class="admin-editor-status">${active?"🟢 Activa":"💾 Solo memoria"}</span>
+      </div>
+      <div class="admin-form-grid">
+        <label>Picking<select id="amPicking">${pickingOptions(s.status||"Pendiente")}</select></label>
+        <label>Envío<select id="amShipping">${shippingOptions(s.shipping||"No")}</select></label>
+        <label>Fecha expedición<input id="amDate" type="date" value="${esc(s.date||"")}"></label>
+        <label>Hora expedición<input id="amTime" type="time" value="${esc(s.time||"")}"></label>
+        <label>Serval<select id="amServal">${msrOptions(s.serval||"No",["No","Si"])}</select></label>
+        <label class="wide">Comentario<textarea id="amComment" rows="3">${esc(s.comment||"")}</textarea></label>
+      </div>
+      <div class="admin-editor-actions">
+        <button class="btn primary" id="adminSaveMemory" data-id="${esc(k)}">💾 Guardar memoria</button>
+        ${active?`<button class="btn ghost" id="adminOpenActiveMsr" data-id="${esc(k)}">📦 Abrir ficha MSR completa</button>`:""}
+        <button class="btn danger-soft" id="adminTrashMemory" data-id="${esc(k)}">🗑️ Enviar memoria a papelera</button>
+      </div>
+      <div class="entity-history">
+        <h4>🕘 Historial de esta ID</h4>
+        ${history.length?history.map(x=>`<div class="history-item"><strong>${new Date(x.at).toLocaleString("es-ES")} · ${esc(x.action)}</strong><small>${esc(x.source||"")}</small></div>`).join(""):'<div class="history-empty">Sin historial registrado.</div>'}
+      </div>`;
+    const saveBtn=target.querySelector("#adminSaveMemory");
+    saveBtn.onclick=()=>{
+      const before={...s};
+      const serval=target.querySelector("#amServal").value;
+      const comment=target.querySelector("#amComment").value.trim();
+      if(serval==="Si"&&!comment){toast("Serval = Sí requiere comentario",true);return;}
+      const shipping=target.querySelector("#amShipping").value;
+      const date=target.querySelector("#amDate").value,time=target.querySelector("#amTime").value;
+      if(shipping!=="No"&&(!date||!time)){toast("Envío Parcial/Total requiere fecha y hora",true);return;}
+      makeAdminSnapshot(`Antes de editar memoria ${k}`);
+      s.status=target.querySelector("#amPicking").value;s.shipping=shipping;s.date=date;s.time=time;s.serval=serval;s.comment=comment;s.updatedAt=nowISO();
+      logAudit("msr",k,"Edición memoria admin",{before,after:{...s}},"admin");
+      save();toast("✅ Memoria actualizada");renderMemoryAdminEditor(k);
+    };
+    const activeBtn=target.querySelector("#adminOpenActiveMsr");if(activeBtn)activeBtn.onclick=()=>renderMsrAdminEditor(k);
+    const trashBtn=target.querySelector("#adminTrashMemory");if(trashBtn)trashBtn.onclick=()=>{
+      if(!confirm(`¿Enviar la memoria de ID ${k} a la papelera?`))return;
+      makeAdminSnapshot(`Antes de borrar memoria ID ${k}`);
+      pushTrash({type:"msr-memory",id:k,state:{...s}});delete db.states[k];
+      logAudit("msr",k,"Memoria enviada a papelera",{},"admin");
+      save();toast("Memoria enviada a papelera");renderAdminModal();
+    };
+  }
+
+  function detectCsvDelimiter(text){
+    const line=String(text||"").split(/\r?\n/).find(x=>x.trim())||"";
+    const counts={";":0,",":0,"\t":0};
+    let quoted=false;
+    for(let i=0;i<line.length;i++){
+      const ch=line[i];
+      if(ch==='"')quoted=!quoted;
+      else if(!quoted&&Object.prototype.hasOwnProperty.call(counts,ch))counts[ch]++;
+    }
+    return Object.entries(counts).sort((a,b)=>b[1]-a[1])[0]?.[1]>0?Object.entries(counts).sort((a,b)=>b[1]-a[1])[0][0]:";";
+  }
+
+  function parseDelimitedText(text,delimiter=";"){
+    const rows=[];let row=[],field="",quoted=false;
+    for(let i=0;i<text.length;i++){
+      const ch=text[i];
+      if(ch==='"'){
+        if(quoted&&text[i+1]==='"'){field+='"';i++;}else quoted=!quoted;
+      }else if(ch===delimiter&&!quoted){row.push(field);field="";
+      }else if((ch==="\n"||ch==="\r")&&!quoted){
+        if(ch==="\r"&&text[i+1]==="\n")i++;
+        row.push(field);field="";rows.push(row);row=[];
+      }else field+=ch;
+    }
+    if(field!==""||row.length){row.push(field);rows.push(row);}
+    return rows;
+  }
+
+  function normalizeRepairRows(rows){
+    let clean=(rows||[]).map(r=>Array.isArray(r)?r.map(v=>v==null?"":String(v)):[]).filter(r=>r.some(v=>v.trim()!==""));
+    if(!clean.length)return {rows:[],changes:["Archivo sin datos útiles"],issues:["No se encontraron filas con contenido."]};
+    let max=0;clean.forEach(r=>{for(let i=r.length-1;i>=0;i--){if(String(r[i]).trim()!==""){max=Math.max(max,i+1);break;}}});
+    clean=clean.map(r=>Array.from({length:max},(_,i)=>String(r[i]??"").trim()));
+    const changes=[],issues=[];
+    const originalHeader=clean[0]||[];
+    const seen=new Map();
+    const header=originalHeader.map((v,i)=>{
+      let h=String(v||"").trim().replace(/^\uFEFF/,"");
+      if(!h){h=`Columna_${i+1}`;changes.push(`Cabecera vacía en columna ${i+1} → ${h}`);}
+      const key=norm(h)||`columna ${i+1}`;
+      const n=(seen.get(key)||0)+1;seen.set(key,n);
+      if(n>1){const renamed=`${h}_${n}`;changes.push(`Cabecera duplicada "${h}" → "${renamed}"`);h=renamed;}
+      return h;
+    });
+    clean[0]=header;
+    const widths=clean.map(r=>r.length);
+    if(new Set(widths).size>1)issues.push("Las filas tenían distinto número de columnas; se han igualado.");
+    if(clean.length>1&&clean.slice(1).some(r=>r.every(v=>!String(v).trim())))changes.push("Se eliminaron filas vacías.");
+    return {rows:clean,changes:[...new Set(changes)],issues};
+  }
+
+  function csvEscape(v){const s=String(v??"");return /[;"\r\n]/.test(s)?`"${s.replace(/"/g,'""')}"`:s}
+  function rowsToCsv(rows){return "\uFEFF"+rows.map(r=>r.map(csvEscape).join(";")).join("\r\n")}
+
+  async function openFileDoctor(file){
+    if(!file)return;
+    try{
+      let rows=[],sourceType="",sheetName="",encoding="";
+      const name=String(file.name||"archivo");
+      if(/\.csv$/i.test(name)||/\.txt$/i.test(name)){
+        sourceType="CSV/TXT";
+        const buf=await file.arrayBuffer();
+        const bytes=new Uint8Array(buf);
+        const utf=new TextDecoder("utf-8").decode(bytes);
+        const win=new TextDecoder("windows-1252").decode(bytes);
+        const badUtf=(utf.match(/�/g)||[]).length,badWin=(win.match(/�/g)||[]).length;
+        const txt=badUtf<=badWin?utf:win;encoding=badUtf<=badWin?"UTF-8":"Windows-1252";
+        const delim=detectCsvDelimiter(txt);
+        rows=parseDelimitedText(txt,delim);
+      }else{
+        if(!window.XLSX)throw new Error("El lector Excel no está disponible.");
+        sourceType="Excel";
+        const buf=await file.arrayBuffer();
+        const wb=XLSX.read(buf,{type:"array",cellDates:true});
+        sheetName=wb.SheetNames[0]||"";
+        if(!sheetName)throw new Error("El Excel no contiene hojas.");
+        rows=XLSX.utils.sheet_to_json(wb.Sheets[sheetName],{header:1,defval:"",raw:false});
+      }
+      const normalized=normalizeRepairRows(rows);
+      showFileDoctorResult({file,name,sourceType,sheetName,encoding,originalRows:rows,rows:normalized.rows,changes:normalized.changes,issues:normalized.issues});
+    }catch(err){
+      recordAppError(err,"file-doctor");
+      showEmployeePopup({type:"error",title:"No se ha podido analizar el archivo",message:err?.message||"Archivo no reconocido.",details:["El archivo original no se ha modificado.","Prueba a abrirlo y guardarlo de nuevo como XLSX o CSV UTF-8."],primaryText:"Entendido"});
+    }
+  }
+
+  function showFileDoctorResult(r){
+    document.querySelector("#fileDoctorModal")?.remove();
+    const overlay=document.createElement("div");
+    overlay.id="fileDoctorModal";overlay.className="admin-modal-overlay";
+    const rows=r.rows||[],header=rows[0]||[],data=rows.slice(1);
+    const msrRecognized=findHeader(header,["Código","Codigo"])>=0;
+    const hceRecognized=findHeader(header,["MATRÍCULA","Matricula","ID ENTRADA"])>=0;
+    const inconsistent=(r.originalRows||[]).filter(x=>Array.isArray(x)&&x.length!==header.length).length;
+    overlay.innerHTML=`<div class="file-doctor-shell">
+      <div class="admin-modal-head">
+        <div><div class="admin-modal-eyebrow">🧰 REPARADOR DE ARCHIVOS</div><h2>${esc(r.name)}</h2><p>Diagnóstico seguro: el original no se modifica.</p></div>
+        <button class="admin-modal-close" id="fileDoctorClose">✕</button>
+      </div>
+      <div class="file-doctor-body">
+        <div class="admin-section-summary">
+          <div><b>📄 ${data.length}</b><span>Filas de datos</span></div>
+          <div><b>🧱 ${header.length}</b><span>Columnas</span></div>
+          <div><b>⚠️ ${inconsistent+r.issues.length}</b><span>Problemas detectados</span></div>
+          <div><b>${msrRecognized?"📦":hceRecognized?"🚛":"❔"}</b><span>${msrRecognized?"Formato MSR reconocido":hceRecognized?"Formato HCE reconocido":"Formato genérico"}</span></div>
+        </div>
+        <div class="file-doctor-info">
+          <span><strong>Tipo:</strong> ${esc(r.sourceType)}</span>
+          ${r.sheetName?`<span><strong>Hoja:</strong> ${esc(r.sheetName)}</span>`:""}
+          ${r.encoding?`<span><strong>Codificación:</strong> ${esc(r.encoding)}</span>`:""}
+        </div>
+        <div class="file-doctor-columns"><strong>Cabeceras detectadas</strong><div>${header.map(h=>`<span>${esc(h)}</span>`).join("")}</div></div>
+        <div class="file-doctor-findings">
+          <h3>🔎 Qué se ha corregido / detectado</h3>
+          ${[...r.changes,...r.issues].length?[...r.changes.map(x=>"✅ "+x),...r.issues.map(x=>"⚠️ "+x)].map(x=>`<div>${esc(x)}</div>`).join(""):'<div class="import-clean">✅ Estructura básica correcta. No ha sido necesario reparar cabeceras.</div>'}
+        </div>
+        <div class="manual-entry-note">🛡️ Descargar una copia reparada no cambia MSR/HCE. Después puedes importarla normalmente y revisar la previsualización segura.</div>
+      </div>
+      <div class="file-doctor-actions">
+        <button class="btn ghost" id="doctorCsv">⬇️ Descargar CSV reparado</button>
+        ${window.XLSX?'<button class="btn ghost" id="doctorXlsx">⬇️ Descargar Excel reparado</button>':""}
+        ${msrRecognized||hceRecognized?'<button class="btn primary" id="doctorPreview">🔎 Previsualizar importación</button>':""}
+      </div>
+    </div>`;
+    document.body.appendChild(overlay);
+    const close=()=>overlay.remove();
+    overlay.querySelector("#fileDoctorClose").onclick=close;
+    overlay.querySelector("#doctorCsv").onclick=()=>download(`reparado_${r.name.replace(/\.[^.]+$/,"")}.csv`,rowsToCsv(rows),"text/csv;charset=utf-8");
+    const xb=overlay.querySelector("#doctorXlsx");if(xb)xb.onclick=()=>{
+      const wb=XLSX.utils.book_new(),ws=XLSX.utils.aoa_to_sheet(rows);XLSX.utils.book_append_sheet(wb,ws,"Reparado");XLSX.writeFile(wb,`reparado_${r.name.replace(/\.[^.]+$/,"")}.xlsx`);
+    };
+    const preview=overlay.querySelector("#doctorPreview");if(preview)preview.onclick=()=>{
+      try{
+        const p=msrRecognized?buildMSRPreview(header,data,r.name):buildHCEPreview(header,data,r.name);
+        close();showImportPreview(p);
+      }catch(err){showEmployeePopup({type:"error",title:"No se puede previsualizar",message:err.message,primaryText:"Entendido"});}
+    };
+  }
+
   function renderDatos(){
     const orphanStates=Object.keys(db.states||{}).filter(id=>!db.msr.some(o=>idNorm(o.id)===id)).length;
     const undo=(()=>{try{return JSON.parse(localStorage.getItem(ADMIN_UNDO_KEY)||"null")}catch{return null}})();
@@ -1577,14 +1798,22 @@
         </div>
         ${(db.meta.lastImportReport.errors?.length||db.meta.lastImportReport.warnings?.length)?`
           <div class="issue-list admin-issue-list">
-            ${[...(db.meta.lastImportReport.errors||[]).map(x=>({level:"error",...x})),...(db.meta.lastImportReport.warnings||[]).map(x=>({level:"warning",...x}))].slice(0,30).map(x=>`
-              <div class="issue-item ${x.level}">
-                <b>${x.level==="error"?"❌":"⚠️"} Línea ${x.line}</b>
-                <span>${esc(x.message)}</span>
-                ${x.value?`<code>${esc(x.value)}</code>`:""}
-              </div>`).join("")}
+            ${[...(db.meta.lastImportReport.errors||[]).map(x=>({level:"error",...x})),...(db.meta.lastImportReport.warnings||[]).map(x=>({level:"warning",...x}))].slice(0,30).map(x=>{const i=importIssueFix(x,db.meta.lastImportReport.kind);return `<div class="issue-item ${x.level}"><b>${x.level==="error"?"❌":"⚠️"} Línea ${i.line}</b><span><strong>${esc(i.problem)}</strong><small>→ ${esc(i.fix)}</small></span>${i.value?`<code>${esc(i.value)}</code>`:""}</div>`}).join("")}
           </div>`:"<div class=\"import-clean\">Sin incidencias en la última importación.</div>"}
       </div>`:""}
+
+      <div class="panel memory-panel">
+        <div class="panel-head">
+          <div><h2>💾 Memoria de IDs MSR</h2><p>Estados guardados que reaparecen cuando vuelves a importar una ID. Las IDs no activas siguen conservando su histórico.</p></div>
+          <span class="admin-badge">${Object.keys(db.states||{}).length} guardadas</span>
+        </div>
+        <div class="memory-toolbar">
+          <input id="memorySearch" class="filter-input" placeholder="🔎 Buscar ID, tienda, estado, comentario…">
+          <label class="memory-check"><input id="memoryOnlyOrphans" type="checkbox"> Solo memorias no activas</label>
+          <button class="btn ghost" id="memoryExportBtn">📤 Exportar memorias</button>
+        </div>
+        ${memoryRowsHtml()}
+      </div>
 
       <div class="panel admin-panel admin-launcher">
         <div class="panel-head">
@@ -1720,7 +1949,10 @@
         <button class="admin-tool-card" data-admin-run="repair"><span>🛠️</span><strong>Reparar estructura</strong><small>Normaliza IDs y elimina duplicados internos</small></button>
         <button class="admin-tool-card" data-admin-run="diag"><span>🧪</span><strong>Descargar diagnóstico</strong><small>Exporta datos e incidencias para revisión</small></button>
         <button class="admin-tool-card" data-admin-run="export-memory"><span>📤</span><strong>Exportar memoria</strong><small>Copia de todos los estados históricos MSR</small></button>
+        <button class="admin-tool-card featured" id="adminFileDoctorBtn"><span>🧰</span><strong>Reparar Excel / CSV</strong><small>Analiza un archivo roto, normaliza filas/cabeceras y crea una copia reparada</small></button>
+        <button class="admin-tool-card" data-admin-run="health-check"><span>🩺</span><strong>Chequeo integral</strong><small>Busca IDs duplicadas, estados inválidos, fechas incompletas y problemas de memoria</small></button>
       </div>
+      <input id="adminFileDoctorInput" type="file" accept=".xlsx,.xls,.csv,.txt" hidden>
       <div class="admin-modal-subsection">
         <h3>🧾 Incidencias de la última importación</h3>
         ${!r?`<div class="admin-editor-empty compact"><span>✅</span><strong>No hay informe reciente</strong></div>`
@@ -1853,8 +2085,9 @@
     const target=document.querySelector("#adminEditorResult");
     if(!target)return;
     if(!o){
+      if(db.states?.[k]){renderMemoryAdminEditor(k);return;}
       target.className="admin-editor-empty";
-      target.innerHTML=`<span>❌</span><strong>ID ${esc(k)} no está en el MSR actual</strong><small>Puede existir solo en memoria histórica. Usa la pestaña Borrados si quieres gestionarla.</small>`;
+      target.innerHTML=`<span>❌</span><strong>ID ${esc(k)} no encontrada</strong><small>No está activa ni existe en memoria histórica.</small>`;
       return;
     }
     target.className="admin-editor-card";
@@ -2035,6 +2268,10 @@
       clearCloudConflict();toast("Aviso de conflicto cerrado");renderAdminModal();
     };
 
+    const fileDoctorBtn=document.querySelector("#adminFileDoctorBtn"),fileDoctorInput=document.querySelector("#adminFileDoctorInput");
+    if(fileDoctorBtn&&fileDoctorInput)fileDoctorBtn.onclick=()=>fileDoctorInput.click();
+    if(fileDoctorInput)fileDoctorInput.onchange=e=>{const f=e.target.files?.[0];if(f)openFileDoctor(f);e.target.value="";};
+
     const backup=document.querySelector("#adminBackupBtn");if(backup)backup.onclick=()=>download(`msr-hce-backup-${today()}.json`,JSON.stringify(db,null,2));
     const restore=document.querySelector("#adminRestoreBtn"),ri=document.querySelector("#adminRestoreInput");
     if(restore&&ri)restore.onclick=()=>ri.click();
@@ -2202,6 +2439,27 @@
       const after={msr:db.msr.length,hce:db.hce.length,states:Object.keys(db.states).length};
       adminNotice=`Reparación completada.\nMSR: ${before.msr} → ${after.msr}\nHCE: ${before.hce} → ${after.hce}\nMemorias: ${before.states} → ${after.states}`;
       save();render();toast("🛠️ Reparación completada");return;
+    }
+
+    if(action==="health-check"){
+      const activeIds=db.msr.map(o=>idNorm(o.id));
+      const duplicateIds=[...new Set(activeIds.filter((id,i,a)=>a.indexOf(id)!==i))];
+      const invalidStates=Object.entries(db.states||{}).filter(([id,s])=>!["Pendiente","En proceso","Finalizado"].includes(s.status||"Pendiente")||!["No","Parcial","Total"].includes(s.shipping||"No")||!["No","Si"].includes(s.serval||"No"));
+      const incompleteShip=Object.entries(db.states||{}).filter(([id,s])=>Boolean(s.date)!==Boolean(s.time)||(s.shipping!=="No"&&(!s.date||!s.time)));
+      const servalBad=Object.entries(db.states||{}).filter(([id,s])=>s.serval==="Si"&&!String(s.comment||"").trim());
+      const activeSet=new Set(activeIds),orphans=Object.keys(db.states||{}).filter(id=>!activeSet.has(id));
+      const hceBad=db.hce.filter(x=>Boolean(x.realDate)!==Boolean(x.realTime)||((x.process||"Pendiente de recibir")!=="Pendiente de recibir"&&(!x.realDate||!x.realTime)));
+      const report=[
+        duplicateIds.length?`❌ ${duplicateIds.length} ID(s) duplicadas en MSR: ${duplicateIds.slice(0,20).join(", ")}`:"✅ Sin IDs duplicadas en MSR",
+        invalidStates.length?`❌ ${invalidStates.length} memoria(s) con estados inválidos`:"✅ Estados de memoria válidos",
+        incompleteShip.length?`⚠️ ${incompleteShip.length} expedición(es) incompletas`:"✅ Fechas/horas de expedición coherentes",
+        servalBad.length?`❌ ${servalBad.length} Serval sin comentario`:"✅ Serval coherente",
+        hceBad.length?`⚠️ ${hceBad.length} HCE con llegada/estado incoherente`:"✅ HCE coherente",
+        `💾 ${orphans.length} memoria(s) no activas (esto puede ser normal)`,
+        cloudConflictActive?"⚠️ Hay un conflicto de nube pendiente":"✅ Sin conflicto de nube pendiente"
+      ];
+      showEmployeePopup({type:(duplicateIds.length||invalidStates.length||servalBad.length)?"error":(incompleteShip.length||hceBad.length||cloudConflictActive)?"warning":"success",title:"Chequeo integral del sistema",message:"Resultado de la revisión automática:",details:report,primaryText:"Entendido"});
+      return;
     }
 
     if(action==="restore-undo"){
@@ -2382,7 +2640,7 @@
     const dto=$("#dashboardDateTo"); if(dto)dto.onchange=()=>{dashboardRolling48=false;dashboardDateTo=dto.value;if(dashboardDateFrom&&dashboardDateTo<dashboardDateFrom)dashboardDateFrom=dashboardDateTo;render()};
     const dtoday=$("#dashboardToday"); if(dtoday)dtoday.onclick=()=>{dashboardRolling48=false;dashboardDateFrom=today();dashboardDateTo=today();render()};
     const dy=$("#dashboardYesterday"); if(dy)dy.onclick=()=>{
-      const d=new Date();d.setDate(d.getDate()-1);const y=d.toISOString().slice(0,10);
+      const d=new Date();d.setDate(d.getDate()-1);const y=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
       dashboardRolling48=false;dashboardDateFrom=y;dashboardDateTo=y;render();
     };
     const d48=$("#dashboard48h"); if(d48)d48.onclick=()=>{
@@ -2469,6 +2727,30 @@
 
     document.querySelectorAll("[data-admin-open]").forEach(btn=>btn.onclick=()=>openAdminCenter(btn.dataset.adminOpen));
     document.querySelectorAll("[data-admin-action]").forEach(btn=>btn.onclick=()=>runAdminAction(btn.dataset.adminAction));
+    const memorySearch=$("#memorySearch"),memoryOnly=$("#memoryOnlyOrphans");
+    const filterMemoryRows=()=>{
+      const q=norm(memorySearch?.value||""),only=Boolean(memoryOnly?.checked);
+      document.querySelectorAll("[data-memory-row]").forEach(row=>{
+        const matches=!q||String(row.dataset.memorySearch||"").includes(q);
+        const active=row.dataset.memoryActive==="1";
+        row.hidden=!(matches&&(!only||!active));
+      });
+    };
+    if(memorySearch)memorySearch.oninput=filterMemoryRows;
+    if(memoryOnly)memoryOnly.onchange=filterMemoryRows;
+    document.querySelectorAll("[data-memory-open]").forEach(btn=>btn.onclick=async()=>{
+      if(!(adminSession&&Date.now()<adminSessionUntil)){
+        if(!(await adminAuth()))return;
+        adminSession=true;adminSessionUntil=Date.now()+(15*60*1000);
+      }
+      adminModalSection="edit";renderAdminModal();renderMemoryAdminEditor(btn.dataset.memoryOpen);
+    });
+    const memoryExport=$("#memoryExportBtn");if(memoryExport)memoryExport.onclick=async()=>{
+      if(!(await adminAuth()))return;
+      download(`msr-memorias-${today()}.json`,JSON.stringify({exportedAt:nowISO(),states:db.states},null,2));
+      toast("📤 Memorias exportadas");
+    };
+
     const backup=$("#backupBtn"); if(backup)backup.onclick=()=>download(`msr-hce-backup-${today()}.json`,JSON.stringify(db,null,2));
     const restore=$("#restoreBtn"),ri=$("#restoreInput"); if(restore)restore.onclick=async()=>{if(await adminAuth())ri.click();};
     if(ri)ri.onchange=e=>{
