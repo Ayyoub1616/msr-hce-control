@@ -1331,3 +1331,32 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 
 /* Consistent terminology */
 .memory-note,.operational-help,.shift-summary{overflow:hidden}
+
+/* Admin memory explorer + file doctor v42 */
+.memory-panel{margin-top:16px}
+.memory-toolbar{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin:0 0 12px}
+.memory-toolbar .filter-input{flex:1 1 300px}
+.memory-check{display:flex;align-items:center;gap:7px;padding:8px 10px;border:1px solid #cbd5e1;border-radius:10px;background:#fff;font-size:10px;font-weight:800;color:#475569}
+.memory-table-wrap{max-height:440px;overflow:auto;border:1px solid #e2e8f0;border-radius:13px}
+.memory-table{min-width:900px!important;table-layout:fixed!important}
+.memory-table thead th{position:sticky;top:0;z-index:2;background:#f8fafc!important}
+.memory-table th:nth-child(1){width:80px}.memory-table th:nth-child(2){width:125px}.memory-table th:nth-child(3){width:135px}.memory-table th:nth-child(4){width:165px}.memory-table th:nth-child(5){width:90px}.memory-table th:nth-child(6){width:170px}.memory-table th:nth-child(7){width:110px}
+.memory-orphan td{background:#fafafa!important;color:#64748b}
+.memory-state{display:inline-flex;border-radius:999px;padding:5px 8px;font-size:9px;font-weight:850}
+.memory-state.active{background:#dcfce7;color:#166534}.memory-state.orphan{background:#e2e8f0;color:#475569}
+
+.admin-tool-card.featured{border:2px solid #60a5fa;background:linear-gradient(180deg,#fff,#eff6ff)}
+.file-doctor-shell{width:min(1000px,calc(100vw - 24px));max-height:calc(100vh - 28px);overflow:auto;background:#f8fafc;border-radius:20px;box-shadow:0 28px 90px rgba(15,23,42,.35)}
+.file-doctor-body{padding:16px 18px}
+.file-doctor-info{display:flex;gap:7px;flex-wrap:wrap;margin:0 0 12px}
+.file-doctor-info span{padding:6px 8px;border:1px solid #dbe4ee;border-radius:9px;background:#fff;font-size:9px;color:#475569}
+.file-doctor-columns,.file-doctor-findings{background:#fff;border:1px solid #e2e8f0;border-radius:13px;padding:12px;margin-top:10px}
+.file-doctor-columns>strong,.file-doctor-findings h3{font-size:11px;margin:0 0 8px}
+.file-doctor-columns>div{display:flex;gap:5px;flex-wrap:wrap}
+.file-doctor-columns span{font-size:8px;padding:4px 6px;border-radius:7px;background:#f1f5f9;color:#334155}
+.file-doctor-findings>div{font-size:10px;line-height:1.45;padding:3px 0}
+.file-doctor-actions{display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;padding:14px 18px;border-top:1px solid #e2e8f0;background:#fff;position:sticky;bottom:0}
+@media(max-width:650px){
+  .memory-toolbar>*{width:100%}
+  .file-doctor-actions .btn{width:100%}
+}
