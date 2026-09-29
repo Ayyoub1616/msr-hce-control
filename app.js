@@ -255,8 +255,8 @@
       detail.textContent=pendingCloudSave?`⚠️ Hay cambios pendientes de confirmar · Última: ${formatSyncTime(lastSyncAt)}`:`Última sincronización: ${formatSyncTime(lastSyncAt)}`;
     }else if(cloudStatus==="error"){
       dot.classList.add("error");
-      title.textContent="Con Internet, pero sin sincronización";
-      detail.textContent=lastSyncError?`${lastSyncError} · Última: ${formatSyncTime(lastSyncAt)}`:`Última sincronización: ${formatSyncTime(lastSyncAt)}`;
+      title.textContent="Modo local · nube no disponible";
+      detail.textContent=lastSyncError?`${lastSyncError} · tus cambios siguen guardándose en este dispositivo`:`Sin nube · última sincronización: ${formatSyncTime(lastSyncAt)}`;
     }else{
       dot.classList.add("checking");
       title.textContent="Comprobando conexión…";
