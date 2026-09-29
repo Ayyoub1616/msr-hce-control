@@ -1822,6 +1822,9 @@
             <div><b>🧹 ${orphanStates}</b><span>Memorias no activas</span></div>
             <div><b>🚛 ${db.hce.length}</b><span>HCE actuales</span></div>
           </div>
+          <div class="actions" style="margin-top:12px">
+            <button class="btn ghost" id="networkDiagBtn">🌐 Diagnóstico de red</button>
+          </div>
         </div>
       </div>
 
@@ -2795,6 +2798,30 @@
 
     document.querySelectorAll("[data-admin-open]").forEach(btn=>btn.onclick=()=>openAdminCenter(btn.dataset.adminOpen));
     document.querySelectorAll("[data-admin-action]").forEach(btn=>btn.onclick=()=>runAdminAction(btn.dataset.adminAction));
+    const networkDiag=$("#networkDiagBtn");
+    if(networkDiag)networkDiag.onclick=async()=>{
+      networkDiag.disabled=true;networkDiag.textContent="⏳ Comprobando…";
+      const details=[
+        `✅ Aplicación: cargada desde ${location.hostname}`,
+        window.XLSX?"✅ Excel: lector local disponible":"❌ Excel: lector no disponible",
+        navigator.onLine?"✅ Navegador: con conexión":"⚠️ Navegador: sin conexión"
+      ];
+      let type="success",title="Red compatible",message="Los componentes locales de la aplicación funcionan.";
+      try{
+        if(!window.MSRCloud?.enabled)throw new Error("Nube no configurada");
+        const d=await window.MSRCloud.diagnose();
+        details.push(`✅ Nube: accesible por ${d.transport} · ${d.latencyMs} ms`);
+        details.push(`🔄 Sincronización: comprobación cada ${d.pollingSeconds} s`);
+      }catch(err){
+        type="warning";title="La red bloquea la nube";
+        message="La app puede seguir trabajando en este dispositivo, pero la sincronización compartida no está accesible desde esta red.";
+        details.push(`❌ Nube: ${err?.message||"bloqueada"}`);
+        details.push("💾 Los cambios se conservarán localmente hasta recuperar una red compatible.");
+      }
+      showEmployeePopup({type,title,message,details,primaryText:"Entendido"});
+      networkDiag.disabled=false;networkDiag.textContent="🌐 Diagnóstico de red";
+    };
+
     const memorySearch=$("#memorySearch"),memoryOnly=$("#memoryOnlyOrphans");
     const filterMemoryRows=()=>{
       const q=norm(memorySearch?.value||""),only=Boolean(memoryOnly?.checked);
