@@ -30,6 +30,7 @@
   let summaryDateFilter = "all";
   let summaryDateFrom = "";
   let summaryDateTo = "";
+  let summaryRolling48 = false;
   let summaryShippingFilter = "all";
   let summaryServalFilter = "all";
   let summaryPickingFilter = "all";
@@ -1275,7 +1276,16 @@
 
   function renderResumen(){
     let rows=orderRows();
-    if(summaryDateFilter!=="all")rows=rows.filter(({o})=>o.planDate===summaryDateFilter);
+    if(summaryRolling48){
+      const now=Date.now(),from=now-(48*60*60*1000);
+      rows=rows.filter(({o})=>{
+        const p=plannedFor(o);
+        return p&&p.getTime()>=from&&p.getTime()<=now;
+      });
+    }else{
+      if(summaryDateFrom)rows=rows.filter(({o})=>o.planDate&&o.planDate>=summaryDateFrom);
+      if(summaryDateTo)rows=rows.filter(({o})=>o.planDate&&o.planDate<=summaryDateTo);
+    }
     if(summaryShippingFilter!=="all")rows=rows.filter(({s})=>(s.shipping||"No")===summaryShippingFilter);
     if(summaryServalFilter!=="all")rows=rows.filter(({s})=>(s.serval||"No")===summaryServalFilter);
     if(summaryPickingFilter!=="all")rows=rows.filter(({s})=>(s.status||"Pendiente")===summaryPickingFilter);
@@ -1284,7 +1294,11 @@
       rows=rows.filter(({o,s})=>norm([o.id,o.description,o.store,s.comment,s.status].join(" ")).includes(q));
     }
     rows=sortSummaryRows(rows);
-    const dates=[...new Set(db.msr.map(o=>o.planDate).filter(Boolean))].sort();
+    const periodLabel=summaryRolling48
+      ?"Últimas 48 horas"
+      :summaryDateFrom||summaryDateTo
+      ?`${summaryDateFrom?fmtDate(summaryDateFrom):"Inicio"} → ${summaryDateTo?fmtDate(summaryDateTo):"Actualidad"}`
+      :"Todas las fechas";
     const totalFiltered=rows.length;
     const maxPage=Math.max(1,Math.ceil(totalFiltered/summaryPageSize));
     if(summaryPage>maxPage)summaryPage=maxPage;
@@ -1305,8 +1319,25 @@
             <span class="help-item total"><b>✅ Total</b><small>Pedido completo enviado; no queda resto.</small></span>
           </div>
         </div>
+        <div class="summary-period-panel">
+          <div class="summary-period-title">
+            <div><strong>📅 Periodo MSR</strong><small>${esc(periodLabel)}</small></div>
+            <div class="summary-period-presets">
+              <button class="btn ${!summaryRolling48&&summaryDateFrom===today()&&summaryDateTo===today()?"primary":"ghost"}" id="summaryToday">Hoy</button>
+              <button class="btn ghost" id="summaryYesterday">Ayer</button>
+              <button class="btn ${summaryRolling48?"primary":"ghost"}" id="summary48h">Últimas 48 h</button>
+              <button class="btn ghost" id="summary7d">Últimos 7 días</button>
+              <button class="btn ${!summaryRolling48&&!summaryDateFrom&&!summaryDateTo?"primary":"ghost"}" id="summaryAllDates">Todas</button>
+            </div>
+          </div>
+          <div class="summary-period-inputs">
+            <label>Desde<input id="summaryDateFrom" class="filter-input" type="date" value="${esc(summaryDateFrom)}" ${summaryRolling48?"disabled":""}></label>
+            <span class="period-arrow">→</span>
+            <label>Hasta<input id="summaryDateTo" class="filter-input" type="date" value="${esc(summaryDateTo)}" ${summaryRolling48?"disabled":""}></label>
+          </div>
+        </div>
+
         <div class="simple-filter-grid summary-filters">
-          <label>Fecha<select id="summaryDateFilter" class="filter-input"><option value="all">📅 Todas</option>${dates.map(d=>`<option value="${esc(d)}" ${summaryDateFilter===d?"selected":""}>${fmtDate(d)}</option>`).join("")}</select></label>
           <label>Picking<select id="summaryPickingFilter" class="filter-input"><option value="all" ${summaryPickingFilter==="all"?"selected":""}>📦 Todos</option><option value="Pendiente" ${summaryPickingFilter==="Pendiente"?"selected":""}>📦 Pendiente</option><option value="En proceso" ${summaryPickingFilter==="En proceso"?"selected":""}>🔄 En proceso</option><option value="Finalizado" ${summaryPickingFilter==="Finalizado"?"selected":""}>✅ Finalizado</option></select></label>
           <label>Envío<select id="summaryShippingFilter" class="filter-input"><option value="all" ${summaryShippingFilter==="all"?"selected":""}>🚚 Todos</option><option value="No" ${summaryShippingFilter==="No"?"selected":""}>⏳ No enviado</option><option value="Parcial" ${summaryShippingFilter==="Parcial"?"selected":""}>🟠 Parcial</option><option value="Total" ${summaryShippingFilter==="Total"?"selected":""}>✅ Total</option></select></label>
           <label>Serval<select id="summaryServalFilter" class="filter-input"><option value="all" ${summaryServalFilter==="all"?"selected":""}>⚠️ Todos</option><option value="No" ${summaryServalFilter==="No"?"selected":""}>No</option><option value="Si" ${summaryServalFilter==="Si"?"selected":""}>🚨 Sí</option></select></label>
@@ -2559,7 +2590,29 @@
 
     document.querySelectorAll("[data-go]").forEach(x=>x.onclick=()=>go(x.dataset.go));
     document.querySelectorAll("[data-summary-filter]").forEach(x=>x.onclick=()=>{summaryFilter=x.dataset.summaryFilter;render()});
-    const sdf=$("#summaryDateFilter"); if(sdf)sdf.onchange=()=>{summaryDateFilter=sdf.value;summaryPage=1;render()};
+    const sfrom=$("#summaryDateFrom"); if(sfrom)sfrom.onchange=()=>{
+      summaryRolling48=false;summaryDateFrom=sfrom.value;
+      if(summaryDateTo&&summaryDateFrom>summaryDateTo)summaryDateTo=summaryDateFrom;
+      summaryPage=1;render();
+    };
+    const sto=$("#summaryDateTo"); if(sto)sto.onchange=()=>{
+      summaryRolling48=false;summaryDateTo=sto.value;
+      if(summaryDateFrom&&summaryDateTo<summaryDateFrom)summaryDateFrom=summaryDateTo;
+      summaryPage=1;render();
+    };
+    const sToday=$("#summaryToday"); if(sToday)sToday.onclick=()=>{summaryRolling48=false;summaryDateFrom=today();summaryDateTo=today();summaryPage=1;render()};
+    const sYesterday=$("#summaryYesterday"); if(sYesterday)sYesterday.onclick=()=>{
+      const d=new Date();d.setDate(d.getDate()-1);
+      const y=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+      summaryRolling48=false;summaryDateFrom=y;summaryDateTo=y;summaryPage=1;render();
+    };
+    const s48=$("#summary48h"); if(s48)s48.onclick=()=>{summaryRolling48=true;summaryPage=1;render()};
+    const s7=$("#summary7d"); if(s7)s7.onclick=()=>{
+      const end=new Date(),start=new Date();start.setDate(start.getDate()-6);
+      const fd=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+      summaryRolling48=false;summaryDateFrom=fd(start);summaryDateTo=fd(end);summaryPage=1;render();
+    };
+    const sAll=$("#summaryAllDates"); if(sAll)sAll.onclick=()=>{summaryRolling48=false;summaryDateFrom="";summaryDateTo="";summaryPage=1;render()};
     const spick=$("#summaryPickingFilter"); if(spick)spick.onchange=()=>{summaryPickingFilter=spick.value;summaryPage=1;render()};
     const sship=$("#summaryShippingFilter"); if(sship)sship.onchange=()=>{summaryShippingFilter=sship.value;summaryPage=1;render()};
     const sserv=$("#summaryServalFilter"); if(sserv)sserv.onchange=()=>{summaryServalFilter=sserv.value;summaryPage=1;render()};
@@ -2567,7 +2620,7 @@
     const skey=$("#summarySortKey"); if(skey)skey.onchange=()=>{summarySortKey=skey.value;summaryPage=1;render()};
     const sdir=$("#summarySortDir"); if(sdir)sdir.onchange=()=>{summarySortDir=sdir.value;summaryPage=1;render()};
     const sreset=$("#resetSummaryFilters"); if(sreset)sreset.onclick=()=>{
-      summaryFilter="all";summaryDateFilter="all";summaryShippingFilter="all";summaryServalFilter="all";summaryPickingFilter="all";summaryTextFilter="";summarySortKey="planDateTime";summarySortDir="asc";summaryPage=1;render();
+      summaryFilter="all";summaryDateFilter="all";summaryDateFrom="";summaryDateTo="";summaryRolling48=false;summaryShippingFilter="all";summaryServalFilter="all";summaryPickingFilter="all";summaryTextFilter="";summarySortKey="planDateTime";summarySortDir="asc";summaryPage=1;render();
     };
 
     const summaryPageSizeEl=$("#summaryPageSize"); if(summaryPageSizeEl)summaryPageSizeEl.onchange=()=>{summaryPageSize=Number(summaryPageSizeEl.value)||25;summaryPage=1;render()};
@@ -2580,7 +2633,7 @@
       if(!confirm(`¿Limpiar las ${db.msr.length} órdenes MSR actuales?\n\nLos estados guardados por ID NO se borrarán (${remembered} IDs con memoria).`))return;
       db.msr=[];
       db.meta.msrImportedAt=null;
-      summaryDateFilter="all";
+      summaryDateFilter="all";summaryDateFrom="";summaryDateTo="";summaryRolling48=false;
       save();
       toast("MSR limpio · estados por ID conservados");
       render();
