@@ -62,7 +62,6 @@
         },
         body:JSON.stringify({id:"main",payload,updated_at:new Date().toISOString()})
       });
-      lastUpdated=null;
     },
     subscribe(onChange){
       if(timer)clearInterval(timer);
