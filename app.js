@@ -59,6 +59,9 @@
   let lastSyncError = "";
   let syncing = false;
   let cloudSaveChain = Promise.resolve();
+  let cloudSaveSeq = 0;
+  let lastCloudFingerprint = null;
+  let cloudConflictActive = Boolean(localStorage.getItem(CLOUD_CONFLICT_KEY));
   let pendingCloudSave = localStorage.getItem("msr_hce_pending_sync")==="1";
   let pendingImportPreview = null;
 
@@ -99,7 +102,7 @@
     window.dispatchEvent(new CustomEvent("msr-data-changed"));
   }
 
-  function queueCloudSave(snapshot){
+  function queueCloudSave(snapshot,seq){
     pendingCloudSave=true;
     localStorage.setItem("msr_hce_pending_sync","1");
     renderSyncStatus();
@@ -107,15 +110,45 @@
     cloudSaveChain=cloudSaveChain
       .catch(()=>{})
       .then(async()=>{
-        if(!window.MSRCloud?.enabled||!navigator.onLine)return;
+        if(!window.MSRCloud?.enabled||!navigator.onLine||cloudConflictActive)return;
         syncing=true;renderSyncStatus();
+
+        const remoteRaw=await window.MSRCloud.load();
+        const remote=remoteRaw?.version?normalizeData(remoteRaw):null;
+        const remoteFingerprint=remote?JSON.stringify(remote):null;
+
+        if(lastCloudFingerprint && remoteFingerprint && remoteFingerprint!==lastCloudFingerprint && remote?.meta?.writerId!==DEVICE_ID){
+          localStorage.setItem(CLOUD_CONFLICT_KEY,JSON.stringify({at:nowISO(),local:db,remote}));
+          cloudConflictActive=true;
+          cloudStatus="error";
+          lastSyncError="Conflicto detectado: otro dispositivo cambió la nube";
+          renderSyncStatus();
+          showEmployeePopup({
+            type:"warning",
+            title:"Sincronización detenida por seguridad",
+            message:"Se han detectado cambios de otro dispositivo antes de subir tus cambios.",
+            details:["Tu copia local se conserva.","La copia remota también se conserva.","Resuelve el conflicto desde Admin → Nube/copias."],
+            primaryText:"Entendido"
+          });
+          return;
+        }
+
         await window.MSRCloud.save(snapshot);
-        pendingCloudSave=false;
-        localStorage.removeItem("msr_hce_pending_sync");
-        markCloudOnline();
+        lastCloudFingerprint=JSON.stringify(normalizeData(snapshot));
+
+        if(seq===cloudSaveSeq){
+          pendingCloudSave=false;
+          localStorage.removeItem("msr_hce_pending_sync");
+          markCloudOnline();
+        }else{
+          pendingCloudSave=true;
+          localStorage.setItem("msr_hce_pending_sync","1");
+          renderSyncStatus();
+        }
       })
       .catch(err=>{
         console.warn("Cloud save",err);
+        recordAppError(err,"cloud-save");
         pendingCloudSave=true;
         localStorage.setItem("msr_hce_pending_sync","1");
         markCloudError(err);
@@ -134,8 +167,9 @@
     localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
     window.dispatchEvent(new CustomEvent("msr-data-changed"));
     const snapshot=JSON.parse(JSON.stringify(db));
+    const seq=++cloudSaveSeq;
     if(window.MSRCloud?.enabled && navigator.onLine){
-      queueCloudSave(snapshot);
+      queueCloudSave(snapshot,seq);
     }else{
       pendingCloudSave=true;
       localStorage.setItem("msr_hce_pending_sync","1");
@@ -276,11 +310,13 @@
       if(cloud?.version && cloudTs>localTs && !pendingCloudSave){
         db=cloud;
         localStorage.setItem(STORAGE_KEY,JSON.stringify(db));
+        lastCloudFingerprint=JSON.stringify(db);
         render();
         toast("☁️ Se descargó la versión más reciente");
       }else{
         db.meta.writerId=DEVICE_ID;
         await window.MSRCloud.save(db);
+        lastCloudFingerprint=JSON.stringify(normalizeData(db));
         toast("☁️ Datos enviados y sincronizados");
       }
       pendingCloudSave=false;
@@ -1718,6 +1754,7 @@
 
   function clearCloudConflict(){
     localStorage.removeItem(CLOUD_CONFLICT_KEY);
+    cloudConflictActive=false;
   }
 
   function adminCloudPanel(){
@@ -1980,7 +2017,7 @@
       if(!confirm("¿Conservar la copia LOCAL y enviarla a la nube?"))return;
       db=normalizeData(conflict.local);
       localStorage.setItem(STORAGE_KEY,JSON.stringify(db));
-      try{if(window.MSRCloud?.enabled)await window.MSRCloud.save(db);clearCloudConflict();pendingCloudSave=false;localStorage.removeItem("msr_hce_pending_sync");markCloudOnline();toast("💻 Copia local conservada y enviada a la nube");renderAdminModal();}
+      try{if(window.MSRCloud?.enabled)await window.MSRCloud.save(db);lastCloudFingerprint=JSON.stringify(normalizeData(db));clearCloudConflict();pendingCloudSave=false;localStorage.removeItem("msr_hce_pending_sync");markCloudOnline();toast("💻 Copia local conservada y enviada a la nube");renderAdminModal();}
       catch(err){recordAppError(err,"conflict-local");markCloudError(err);toast("No se pudo enviar la copia local",true);}
     };
     const conflictRemote=document.querySelector("#restoreConflictRemote");
@@ -1990,7 +2027,7 @@
       makeAdminSnapshot("Antes de resolver conflicto usando nube");
       db=normalizeData(conflict.remote);
       localStorage.setItem(STORAGE_KEY,JSON.stringify(db));
-      clearCloudConflict();pendingCloudSave=false;localStorage.removeItem("msr_hce_pending_sync");markCloudOnline();toast("☁️ Copia de nube aplicada");renderAdminModal();
+      lastCloudFingerprint=JSON.stringify(normalizeData(db));clearCloudConflict();pendingCloudSave=false;localStorage.removeItem("msr_hce_pending_sync");markCloudOnline();toast("☁️ Copia de nube aplicada");renderAdminModal();
     };
     const discardConflict=document.querySelector("#discardConflict");
     if(discardConflict)discardConflict.onclick=()=>{
@@ -2799,19 +2836,49 @@
   async function bootstrapCloud(){
     if(!window.MSRCloud?.enabled){cloudStatus="error";lastSyncError="Nube no configurada";renderSyncStatus();return;}
     try{
-      const cloud=await window.MSRCloud.load();
-      if(cloud && cloud.version){
-        db=normalizeData(cloud);
-        localStorage.setItem(STORAGE_KEY,JSON.stringify(db));
-        render();
-        pendingCloudSave=false;
-        localStorage.removeItem("msr_hce_pending_sync");
-        markCloudOnline();
-        toast("Datos sincronizados desde la nube");
+      const rawCloud=await window.MSRCloud.load();
+      const cloud=rawCloud?.version?normalizeData(rawCloud):null;
+
+      if(cloud){
+        lastCloudFingerprint=JSON.stringify(cloud);
+        const localDifferent=JSON.stringify(db)!==lastCloudFingerprint;
+
+        if(pendingCloudSave && localDifferent && cloud.meta?.writerId!==DEVICE_ID){
+          localStorage.setItem(CLOUD_CONFLICT_KEY,JSON.stringify({at:nowISO(),local:db,remote:cloud}));
+          cloudConflictActive=true;
+          cloudStatus="error";
+          lastSyncError="Hay cambios locales pendientes y una copia distinta en la nube";
+          renderSyncStatus();
+          showEmployeePopup({
+            type:"warning",
+            title:"Sincronización pendiente de revisión",
+            message:"Este dispositivo tiene cambios sin subir y la nube también cambió.",
+            details:["No se ha sobrescrito ninguna copia.","Resuelve el conflicto desde Admin → Nube/copias."],
+            primaryText:"Entendido"
+          });
+        }else if(pendingCloudSave){
+          db.meta.writerId=DEVICE_ID;
+          await window.MSRCloud.save(db);
+          lastCloudFingerprint=JSON.stringify(normalizeData(db));
+          pendingCloudSave=false;
+          localStorage.removeItem("msr_hce_pending_sync");
+          clearCloudConflict();
+          markCloudOnline();
+          toast("☁️ Cambios pendientes sincronizados");
+        }else{
+          db=cloud;
+          localStorage.setItem(STORAGE_KEY,JSON.stringify(db));
+          render();
+          markCloudOnline();
+          toast("Datos sincronizados desde la nube");
+        }
       }else{
+        db.meta.writerId=DEVICE_ID;
         await window.MSRCloud.save(db);
+        lastCloudFingerprint=JSON.stringify(normalizeData(db));
         pendingCloudSave=false;
         localStorage.removeItem("msr_hce_pending_sync");
+        clearCloudConflict();
         markCloudOnline();
       }
 
@@ -2819,19 +2886,35 @@
         if(!next || !next.version)return;
         const normalized=normalizeData(next);
         const incoming=JSON.stringify(normalized);
-        const current=JSON.stringify(db);
-        if(incoming===current)return;
 
-        if(pendingCloudSave){
+        // Echo of a save made by this same browser/device.
+        if(normalized.meta?.writerId===DEVICE_ID){
+          lastCloudFingerprint=incoming;
+          if((Number(normalized.meta?.revision)||0)>=(Number(db.meta?.revision)||0)){
+            pendingCloudSave=false;
+            localStorage.removeItem("msr_hce_pending_sync");
+            markCloudOnline();
+          }
+          return;
+        }
+
+        const current=JSON.stringify(db);
+        if(incoming===current){
+          lastCloudFingerprint=incoming;
+          return;
+        }
+
+        if(pendingCloudSave || cloudConflictActive){
           localStorage.setItem(CLOUD_CONFLICT_KEY,JSON.stringify({at:nowISO(),local:db,remote:normalized}));
+          cloudConflictActive=true;
           cloudStatus="error";
-          lastSyncError="Conflicto detectado: hay cambios locales pendientes y cambios nuevos en la nube";
+          lastSyncError="Conflicto detectado: hay cambios locales y remotos";
           renderSyncStatus();
           showEmployeePopup({
             type:"warning",
             title:"Cambios simultáneos detectados",
             message:"Otro dispositivo ha actualizado la nube mientras este dispositivo tenía cambios pendientes.",
-            details:["No se ha sobrescrito tu trabajo local.","Usa Forzar sincronización o revisa Datos / copias antes de continuar."],
+            details:["No se ha sobrescrito tu trabajo local.","Resuelve qué copia conservar desde Admin → Nube/copias."],
             primaryText:"Entendido"
           });
           return;
@@ -2839,12 +2922,14 @@
 
         db=normalized;
         localStorage.setItem(STORAGE_KEY,incoming);
+        lastCloudFingerprint=incoming;
         markCloudOnline();
         render();
-        toast("Cambios recibidos en directo");
+        toast("☁️ Cambios recibidos en directo");
       });
     }catch(err){
       console.warn("Cloud load",err);
+      recordAppError(err,"cloud-bootstrap");
       markCloudError(err);
       setTimeout(()=>toast("Nube temporalmente no disponible · la app sigue funcionando en local",true),300);
     }
