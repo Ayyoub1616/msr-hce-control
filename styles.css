@@ -1296,3 +1296,38 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
   .cloud-conflict-actions{width:100%}
   .cloud-conflict-actions .btn{flex:1 1 180px}
 }
+
+/* Final polish v41 */
+.serval-comment-popup{border-top-color:#dc2626!important}
+.serval-required-comment{
+  width:100%;margin-top:12px;padding:11px 12px;border-radius:12px;
+  border:1px solid #fca5a5;background:#fff7f7;color:#7f1d1d;
+  resize:vertical;min-height:90px;font-size:12px;line-height:1.4
+}
+.serval-required-comment:focus{border-color:#ef4444!important;box-shadow:0 0 0 3px rgba(239,68,68,.12)!important}
+.serval-required-comment.input-error{
+  border-color:#dc2626!important;box-shadow:0 0 0 3px rgba(220,38,38,.15)!important
+}
+.row-serval td{
+  background:#fee2e2!important;color:#7f1d1d!important;
+  border-top-color:#fca5a5!important;border-bottom-color:#fca5a5!important
+}
+.row-serval td:first-child{box-shadow:inset 5px 0 0 #dc2626}
+.row-serval textarea,.row-serval select{
+  background:#fff1f2!important;border-color:#ef4444!important;color:#991b1b!important;font-weight:850!important
+}
+.row-complete-late td{background:#faf5ff!important}
+.row-partial td{background:#fffaf0!important}
+.row-success td{background:#f5fcf7!important}
+.row-danger td{background:#fff5f5!important}
+.row-info td{background:#f7fbff!important}
+.row-done-late td{background:#faf5ff!important}
+
+/* Filters visually match their state */
+.summary-filters select,.hce-simple-filters select{font-weight:750}
+#summaryPickingFilter option[value="Pendiente"]{color:#92400e}
+#summaryPickingFilter option[value="En proceso"]{color:#1d4ed8}
+#summaryPickingFilter option[value="Finalizado"]{color:#166534}
+
+/* Consistent terminology */
+.memory-note,.operational-help,.shift-summary{overflow:hidden}
