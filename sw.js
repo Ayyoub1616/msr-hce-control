@@ -1,4 +1,4 @@
-const CACHE="msr-hce-v45";
+const CACHE="msr-hce-v46";
 const CORE=["./","./index.html","./styles.css","./app.js","./cloud-config.js","./cloud.js","./vendor/xlsx.full.min.js","./manifest.webmanifest","./icon-192.png","./icon-512.png"];
 
 self.addEventListener("install",event=>{
