@@ -475,7 +475,7 @@
   }
   function parseDate(v){
     if(v==null||v==="")return "";
-    if(v instanceof Date && !isNaN(v)) return v.toISOString().slice(0,10);
+    if(v instanceof Date && !isNaN(v)) return `${v.getFullYear()}-${String(v.getMonth()+1).padStart(2,"0")}-${String(v.getDate()).padStart(2,"0")}`;
     if(typeof v==="number" && window.XLSX){
       const d=XLSX.SSF.parse_date_code(v); if(d) return `${d.y}-${String(d.m).padStart(2,"0")}-${String(d.d).padStart(2,"0")}`;
     }
@@ -1613,6 +1613,17 @@
     };
   }
 
+  function decodeTextSmart(bytes){
+    const utf=new TextDecoder("utf-8").decode(bytes);
+    const win=new TextDecoder("windows-1252").decode(bytes);
+    const score=s=>{
+      const replacement=(s.match(/�/g)||[]).length*20;
+      const mojibake=(s.match(/Ã.|Â.|â€|â€™|â€œ|â€/g)||[]).length*5;
+      return replacement+mojibake;
+    };
+    return score(utf)<=score(win)?{text:utf,encoding:"UTF-8"}:{text:win,encoding:"Windows-1252"};
+  }
+
   function detectCsvDelimiter(text){
     const line=String(text||"").split(/\r?\n/).find(x=>x.trim())||"";
     const counts={";":0,",":0,"\t":0};
@@ -1642,11 +1653,20 @@
   }
 
   function normalizeRepairRows(rows){
-    let clean=(rows||[]).map(r=>Array.isArray(r)?r.map(v=>v==null?"":String(v)):[]).filter(r=>r.some(v=>v.trim()!==""));
+    const source=Array.isArray(rows)?rows:[];
+    const originalNonEmpty=source.filter(r=>Array.isArray(r)&&r.some(v=>String(v??"").trim()!==""));
+    const removedEmpty=Math.max(0,source.length-originalNonEmpty.length);
+    const originalWidths=originalNonEmpty.map(r=>r.length);
+    let clean=originalNonEmpty.map(r=>r.map(v=>v==null?"":String(v)));
     if(!clean.length)return {rows:[],changes:["Archivo sin datos útiles"],issues:["No se encontraron filas con contenido."]};
-    let max=0;clean.forEach(r=>{for(let i=r.length-1;i>=0;i--){if(String(r[i]).trim()!==""){max=Math.max(max,i+1);break;}}});
-    clean=clean.map(r=>Array.from({length:max},(_,i)=>String(r[i]??"").trim()));
+
+    let max=0;
+    clean.forEach(r=>{for(let i=r.length-1;i>=0;i--){if(String(r[i]).trim()!==""){max=Math.max(max,i+1);break;}}});
     const changes=[],issues=[];
+    if(removedEmpty)changes.push(`Se eliminaron ${removedEmpty} fila(s) completamente vacías.`);
+    if(new Set(originalWidths).size>1)issues.push("Las filas tenían distinto número de columnas; se han igualado.");
+    clean=clean.map(r=>Array.from({length:max},(_,i)=>String(r[i]??"").trim()));
+
     const originalHeader=clean[0]||[];
     const seen=new Map();
     const header=originalHeader.map((v,i)=>{
@@ -1658,10 +1678,7 @@
       return h;
     });
     clean[0]=header;
-    const widths=clean.map(r=>r.length);
-    if(new Set(widths).size>1)issues.push("Las filas tenían distinto número de columnas; se han igualado.");
-    if(clean.length>1&&clean.slice(1).some(r=>r.every(v=>!String(v).trim())))changes.push("Se eliminaron filas vacías.");
-    return {rows:clean,changes:[...new Set(changes)],issues};
+    return {rows:clean,changes:[...new Set(changes)],issues:[...new Set(issues)]};
   }
 
   function csvEscape(v){const s=String(v??"");return /[;"\r\n]/.test(s)?`"${s.replace(/"/g,'""')}"`:s}
@@ -1676,10 +1693,8 @@
         sourceType="CSV/TXT";
         const buf=await file.arrayBuffer();
         const bytes=new Uint8Array(buf);
-        const utf=new TextDecoder("utf-8").decode(bytes);
-        const win=new TextDecoder("windows-1252").decode(bytes);
-        const badUtf=(utf.match(/�/g)||[]).length,badWin=(win.match(/�/g)||[]).length;
-        const txt=badUtf<=badWin?utf:win;encoding=badUtf<=badWin?"UTF-8":"Windows-1252";
+        const decoded=decodeTextSmart(bytes);
+        const txt=decoded.text;encoding=decoded.encoding;
         const delim=detectCsvDelimiter(txt);
         rows=parseDelimitedText(txt,delim);
       }else{
@@ -2814,9 +2829,14 @@
       const s=String(work||"").trim();
       const m=s.match(/_(\d{2})(\d{2})_(\d{1,2})(AM|PM)(?:_|$)/i);
       if(!m)return {date:"",time:""};
-      const day=m[1],month=m[2],year=String(new Date().getFullYear());
+      const day=m[1],month=m[2],now=new Date(),baseYear=now.getFullYear();
       let hour=Number(m[3]);const ap=m[4].toUpperCase();
       if(ap==="PM"&&hour<12)hour+=12;if(ap==="AM"&&hour===12)hour=0;
+      const candidates=[baseYear-1,baseYear,baseYear+1]
+        .map(y=>({y,d:new Date(y,Number(month)-1,Number(day),hour,0,0)}))
+        .filter(x=>x.d.getMonth()===Number(month)-1&&x.d.getDate()===Number(day))
+        .sort((a,b)=>Math.abs(a.d-now)-Math.abs(b.d-now));
+      const year=String(candidates[0]?.y??baseYear);
       return {date:`${year}-${month}-${day}`,time:`${String(hour).padStart(2,"0")}:00`};
     };
 
@@ -3053,12 +3073,11 @@
       try{
         let rows=[];
         const name=String(file.name||"").toLowerCase();
-        if(name.endsWith(".csv")){
+        if(name.endsWith(".csv")||name.endsWith(".txt")){
           const bytes=new Uint8Array(e.target.result);
-          let text="";
-          try{text=new TextDecoder("windows-1252").decode(bytes);}
-          catch{text=new TextDecoder("utf-8").decode(bytes);}
-          rows=parseSemicolonCSV(text);
+          const decoded=decodeTextSmart(bytes);
+          const delimiter=detectCsvDelimiter(decoded.text);
+          rows=parseDelimitedText(decoded.text,delimiter);
         }else{
           const wb=XLSX.read(e.target.result,{type:"array",cellDates:true});
           const ws=wb.Sheets[wb.SheetNames[0]];
